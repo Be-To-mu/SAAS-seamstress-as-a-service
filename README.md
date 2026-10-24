@@ -2,10 +2,11 @@
 
 Design one-off clothing on a 3D model of your own body, turn the design into sewing patterns, and have it made by a seamstress.
 
-**Milestone 1 (this repo now): body → 3D model + sewing measurements.**
+**Milestone 1:** body → 3D model + sewing measurements. **Milestone 2:** those measurements → a sewable 2D pattern.
 
 - `ios/`: iPhone app (LiDAR iPhone, iOS 26). It records a 30 s turn scan and sends it to the fitting service. Then it shows the fitted body and a measurement sheet.
 - `bodyfit/`: Python package. It fits the [Anny](https://github.com/naver/anny) body model to the scan, then measures it. Anny is Apache-2.0 with CC0 assets, so it's fine for commercial use.
+- `web/`: Next.js studio. Type in (or paste) the measurements, design a coat, knit top or skirt from photos and words, and download a 1:1 PDF pattern. See [`web/README.md`](web/README.md).
 - `docs/capture-format.md`: what the phone sends.
 
 ## Run it
