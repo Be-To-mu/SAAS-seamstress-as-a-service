@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { findRecipes } from "@/lib/atlas";
 import { askJson, geminiConfigured, geminiModelName } from "@/lib/gemini";
+import { mongoConfigured } from "@/lib/mongo";
 import { checkGarment } from "@/pattern/check";
 import { compose } from "@/pattern/compose";
 import { familyOf } from "@/pattern/families";
@@ -22,10 +24,24 @@ const bodySchema = z.object({
   request: z.string().min(2).max(300),
 });
 
+/** Rank recipes with Atlas Vector Search when it is configured, then fall back to the keyword list. */
+async function examplesFor(request: string, g: Garment, spec: Spec, n = 3) {
+  const local = pickRecipes(request, g, spec, RECIPES.length);
+  if (!mongoConfigured()) return local.slice(0, n);
+  try {
+    const ranked = await findRecipes(request, spec.family, n);
+    const byId = new Map(local.map((x) => [x.recipe.id, x]));
+    const fromAtlas = ranked.map((r) => byId.get(r.id)).filter((x): x is (typeof local)[number] => Boolean(x));
+    const rest = local.filter((x) => !fromAtlas.includes(x));
+    return [...fromAtlas, ...rest].slice(0, n);
+  } catch {
+    return local.slice(0, n);
+  }
+}
+
 /** The instructions for the pattern-cutter model, with worked examples that were verified on this very garment. */
-function systemPrompt(spec: Spec, g: Garment, request: string): string {
+function systemPrompt(spec: Spec, g: Garment, request: string, examples: ReturnType<typeof pickRecipes>): string {
   const family = familyOf(spec);
-  const examples = pickRecipes(request, g, spec, 3);
   const shots = examples
     .map((x) => `Worked example. Request: "${x.recipe.title}". Correct answer for this garment:\n${JSON.stringify({ explanation: x.recipe.explanation, ops: x.ops })}`)
     .join("\n\n");
@@ -91,7 +107,7 @@ export async function POST(req: Request) {
 
   const hoodJoin = familyOf(spec).hoodJoin(spec);
   const description = `${describeGarment(current.garment)}${hoodJoin ? `\n\nA hood is sewn to: ${hoodJoin.map((r) => `${r.panel}.${r.edge}`).join(" + ")}` : "\n\nThis garment cannot take a hood."}`;
-  const SYSTEM = systemPrompt(spec, current.garment, request);
+  const SYSTEM = systemPrompt(spec, current.garment, request, await examplesFor(request, current.garment, spec, 3));
   const attempts: Attempt[] = [];
   let feedback = "";
 

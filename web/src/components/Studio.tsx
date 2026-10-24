@@ -8,11 +8,12 @@ import { PatternView } from "@/components/PatternView";
 import { DESIGN_MODES, MAX_REFERENCES, type DesignMode } from "@/lib/design";
 import { buildPatternPdf } from "@/lib/pdf";
 import { compose, type Composed } from "@/pattern/compose";
+import type { SavedBody, SavedGarment } from "@/lib/atlasTypes";
 import type { Feature } from "@/pattern/features";
 import { estimateFabric, layoutGarment } from "@/pattern/layout";
 import { FAMILIES, familyOf } from "@/pattern/families";
 import { pickRecipes, type Recipe } from "@/pattern/recipes";
-import { DEFAULT_SPEC, SAMPLE_BODY, defaultSpec, specKeys, type FamilyId, type Measurements, type Spec } from "@/pattern/spec";
+import { DEFAULT_SPEC, SAMPLE_BODY, defaultSpec, measurementsSchema, specSchema, specKeys, type FamilyId, type Measurements, type Spec } from "@/pattern/spec";
 
 interface Photo {
   id: string;
@@ -56,6 +57,7 @@ interface Status {
   gemini: boolean;
   model: string | null;
   atlas: boolean;
+  counts?: { garments: number; recipes: number; bodies: number } | null;
 }
 
 async function shrink(file: File, max: number, quality: number): Promise<string> {
@@ -122,14 +124,48 @@ export function Studio() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
-  const [busy, setBusy] = useState<"extract" | "feature" | "save" | null>(null);
+  const [busy, setBusy] = useState<"extract" | "feature" | "save" | "library" | null>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [request, setRequest] = useState("");
   const [attempts, setAttempts] = useState<Attempt[] | null>(null);
   const [pdfPiece, setPdfPiece] = useState("all");
+  const [library, setLibrary] = useState<SavedGarment[]>([]);
+  const [libraryVia, setLibraryVia] = useState<string>("recent");
+  const [libraryQ, setLibraryQ] = useState("");
+  const [bodies, setBodies] = useState<SavedBody[]>([]);
+  const [bodyName, setBodyName] = useState("");
+
+  async function refreshStatus() {
+    fetch("/api/status").then((r) => r.json()).then(setStatus).catch(() => undefined);
+  }
+
+  async function refreshLibrary(q?: string) {
+    try {
+      const url = q?.trim() ? `/api/garments?q=${encodeURIComponent(q.trim())}` : "/api/garments";
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not read Atlas.");
+      setLibrary(data.items ?? []);
+      setLibraryVia(data.via ?? "recent");
+    } catch {
+      setLibrary([]);
+    }
+  }
+
+  async function refreshBodies() {
+    try {
+      const res = await fetch("/api/bodies");
+      const data = await res.json();
+      if (res.ok) setBodies(data.items ?? []);
+    } catch {
+      setBodies([]);
+    }
+  }
 
   useEffect(() => {
-    fetch("/api/status").then((r) => r.json()).then(setStatus).catch(() => undefined);
+    refreshStatus();
+    refreshLibrary();
+    refreshBodies();
   }, []);
 
   const composed = useMemo((): { ok: true; value: Composed } | { ok: false; error: string } => {
@@ -400,14 +436,84 @@ export function Studio() {
           fabric,
           check: { ok: composed.value.check.ok, errors: errors.length, warnings: warnings.length },
           thumbnails: photos.map((p) => p.thumb),
+          thumbnail: active?.image,
           confidence: confidence ?? undefined,
+          garment: design?.garment,
+          notes: design?.notes,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Save failed.");
-      setMessage({ kind: "ok", text: `Saved to Atlas (${data.id}).` });
+      setMessage({ kind: "ok", text: `Saved to Atlas${data.embedded ? " with a search vector" : ""} (${data.title ?? data.id}).` });
+      await Promise.all([refreshLibrary(), refreshStatus()]);
     } catch (e) {
       setMessage({ kind: "err", text: e instanceof Error ? e.message : "Save failed." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveBody() {
+    const name = bodyName.trim() || "My measurements";
+    setBusy("save");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/bodies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, measurements: m, source: "typed" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Save failed.");
+      setBodyName("");
+      setMessage({ kind: "ok", text: `Saved "${name}" to Atlas.` });
+      await Promise.all([refreshBodies(), refreshStatus()]);
+    } catch (e) {
+      setMessage({ kind: "err", text: e instanceof Error ? e.message : "Save failed." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function loadBody(b: SavedBody) {
+    const parsed = measurementsSchema.safeParse(b.measurements);
+    if (!parsed.success) {
+      setMessage({ kind: "err", text: "Those saved measurements no longer fit the form." });
+      return;
+    }
+    setM(parsed.data);
+    setMessage({ kind: "ok", text: `Loaded "${b.name}".` });
+  }
+
+  function loadGarment(item: SavedGarment) {
+    const specOk = specSchema.safeParse(item.spec);
+    const bodyOk = measurementsSchema.safeParse(item.measurements);
+    if (!specOk.success || !bodyOk.success) {
+      setMessage({ kind: "err", text: "That saved design no longer fits the form." });
+      return;
+    }
+    setSpec(specOk.data);
+    setM(bodyOk.data);
+    setFeatures(item.features ?? []);
+    setDesign({
+      designMode: "refine",
+      garment: item.garment || specOk.data.family,
+      fitsFamily: true,
+      reason: item.description,
+      notes: "",
+      unsupported: [],
+    });
+    setConfidence(null);
+    setSources(null);
+    setAttempts(null);
+    goTo("pattern");
+    setMessage({ kind: "ok", text: `Loaded "${item.title}" from Atlas.` });
+  }
+
+  async function searchLibrary() {
+    setBusy("library");
+    try {
+      await refreshLibrary(libraryQ);
     } finally {
       setBusy(null);
     }
@@ -466,7 +572,11 @@ export function Studio() {
           {status && (
             <p className="modes">
               <span className={status.gemini ? "pill on" : "pill off"}>{status.gemini ? `Gemini: ${status.model}` : "Gemini: demo mode (no key)"}</span>
-              <span className={status.atlas ? "pill on" : "pill off"}>{status.atlas ? "Atlas connected" : "Atlas: not configured"}</span>
+              <span className={status.atlas ? "pill on" : "pill off"}>
+                {status.atlas
+                  ? `Atlas: ${status.counts ? `${status.counts.garments} garments · ${status.counts.bodies} bodies` : "connected"}`
+                  : "Atlas: not configured"}
+              </span>
             </p>
           )}
         </div>
@@ -504,6 +614,24 @@ export function Studio() {
             ))}
           </div>
           <p className="note">Paste the numbers from your teammate&apos;s scan here. Tape-measure numbers are more accurate than a phone scan, so use them if you have them.</p>
+          <div className="row body-save">
+            <input type="text" value={bodyName} placeholder="Name these measurements, e.g. Matt" onChange={(e) => setBodyName(e.target.value)} />
+            <button type="button" className="ghost" onClick={saveBody} disabled={busy !== null || !status?.atlas}>
+              {status?.atlas ? "Save body to Atlas" : "Atlas needed to save"}
+            </button>
+          </div>
+          {bodies.length > 0 && (
+            <div className="saved-bodies">
+              <span className="note">Saved bodies:</span>
+              <div className="chips">
+                {bodies.map((b) => (
+                  <button key={b.id} type="button" className="chip" onClick={() => loadBody(b)} title={new Date(b.createdAt).toLocaleString()}>
+                    {b.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <button className="big" onClick={() => goTo("design")}>
             Next: design your garment →
           </button>
@@ -842,6 +970,51 @@ export function Studio() {
             <div className="notions">
               <strong>Notions:</strong> {composed.value.garment.notions.map((n) => `${n.name} x${n.qty}`).join(" · ")}
             </div>
+            <section className="library">
+              <h2>Atlas library</h2>
+              {status?.atlas ? (
+                <>
+                  <form
+                    className="row"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      searchLibrary();
+                    }}
+                  >
+                    <input type="text" value={libraryQ} placeholder="Search saved designs, e.g. hoodie with a hood" onChange={(e) => setLibraryQ(e.target.value)} />
+                    <button type="submit" className="ghost" disabled={busy !== null}>
+                      {busy === "library" ? "Searching…" : libraryQ.trim() ? "Search" : "Refresh"}
+                    </button>
+                  </form>
+                  <p className="note first">
+                    {libraryVia === "vector" ? "Ranked by Atlas Vector Search." : libraryVia === "text" ? "Ranked by Atlas Search." : "Most recently saved."} {library.length} shown.
+                  </p>
+                  {library.length === 0 ? (
+                    <p className="note">Nothing saved yet. Press “Save to Atlas” on a pattern that passes the checks.</p>
+                  ) : (
+                    <ul className="library-list">
+                      {library.map((item) => (
+                        <li key={item.id}>
+                          <button type="button" className="library-card" onClick={() => loadGarment(item)}>
+                            {item.thumbnail ? <img src={item.thumbnail} alt="" /> : <span className="swatch" style={{ background: String((item.spec as { clothColor?: string }).clothColor ?? "#ccc") }} />}
+                            <span>
+                              <strong>{item.title}</strong>
+                              <em>
+                                {FAMILIES[item.family]?.label ?? item.family}
+                                {item.featureCount ? ` · ${item.featureCount} extra${item.featureCount === 1 ? "" : "s"}` : ""}
+                                {item.score !== undefined ? ` · ${item.score.toFixed(2)}` : ""}
+                              </em>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <p className="note">Add MONGODB_URI to .env.local to save and search designs on Atlas.</p>
+              )}
+            </section>
             <p className="note">
               The checks confirm every piece is closed and every seam matches its partner. They do not prove fit: make a toile before cutting good cloth.
             </p>
