@@ -27,9 +27,8 @@ targets:
         LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiredDeviceCapabilities: [arkit]
+        NSPhotoLibraryUsageDescription: Seamstress uses photos you pick as references for a garment design.
+        GeminiAPIKey: $(GEMINI_API_KEY)
+        GeminiModel: $(GEMINI_MODEL)
         NSCameraUsageDescription: Seamstress uses the camera and LiDAR to make a 3D model of your body.
         NSMotionUsageDescription: Seamstress uses the motion sensors to know which way is down while scanning.
-        NSLocalNetworkUsageDescription: Seamstress sends scans to the fitting service on your network.
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
-        BodyfitServiceURL: $(BODYFIT_SERVICE_URL)

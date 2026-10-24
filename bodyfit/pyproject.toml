@@ -15,12 +15,11 @@ dependencies = [
     "scipy",
     "trimesh",
     "rtree",
-    "embreex",
     "pillow",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "matplotlib"]
+dev = ["pytest", "matplotlib", "embreex"]  # embreex: fast ray casting for synthetic scans
 server = ["fastapi", "uvicorn[standard]", "python-multipart"]
 
 [project.scripts]

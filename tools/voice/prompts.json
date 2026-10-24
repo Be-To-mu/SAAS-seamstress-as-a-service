@@ -1,0 +1,20 @@
+{
+  "setup": "Put the phone upright at waist height. Walk about two metres away and face the phone, with nothing in your hands. Hold your arms straight and a little out to the sides, like an upside-down V.",
+  "turn": "Now turn slowly to your left, all the way round, keeping your arms still. You have twenty seconds.",
+  "fifteen": "Fifteen.",
+  "ten": "Ten seconds left.",
+  "five": "Five.",
+  "four": "Four.",
+  "three": "Three.",
+  "two": "Two.",
+  "one": "One.",
+  "done": "Done. You can come back to the phone.",
+  "good": "Good. Hold still.",
+  "step_back": "Step back a little.",
+  "come_closer": "Come a little closer.",
+  "whole_body": "Make sure your whole body, from head to feet, is in view.",
+  "not_seen": "I can't see you. Stand in front of the phone.",
+  "arms_up": "Lift your arms a little away from your body, like an upside-down V.",
+  "arms_down": "Lower your arms a little, to about halfway.",
+  "stay_centre": "Stay in the middle of the picture while you turn."
+}

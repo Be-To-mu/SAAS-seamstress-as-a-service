@@ -1,4 +1,4 @@
-"""bodyfit command line: serve | fit | synth."""
+"""bodyfit command line: usb | serve | fit | synth."""
 
 from __future__ import annotations
 
@@ -11,7 +11,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="bodyfit")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("serve", help="run the fitting service for the iPhone app")
+    u = sub.add_parser("usb", help="demo mode: fit scans from the plugged-in iPhone and send results back")
+    u.add_argument("--device", help="device UDID (default: the first connected iPhone)")
+    u.add_argument("--root", default="scans", help="where scans and results are kept")
+    u.add_argument("--redo", action="store_true", help="fit every scan on the phone once more")
+
+    s = sub.add_parser("serve", help="run the fitting service (network mode, for later)")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--root", default="scans", help="where scans and results are kept")
@@ -26,7 +31,11 @@ def main() -> None:
     y.add_argument("--seed", type=int, default=0)
 
     args = ap.parse_args()
-    if args.cmd == "serve":
+    if args.cmd == "usb":
+        from .usb import watch
+
+        watch(args.device, args.root, redo=args.redo)
+    elif args.cmd == "serve":
         from .server import serve
 
         serve(args.host, args.port, args.root)

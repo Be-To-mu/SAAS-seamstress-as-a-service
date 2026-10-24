@@ -1,13 +1,13 @@
 # Capture bundle format (v1)
 
-One turn scan = one folder. The iPhone app writes it, zips it, and POSTs it to `bodyfit serve`.
+One turn scan = one folder. The iPhone app writes it in its Documents/scans. In demo mode `bodyfit usb` copies it off the phone over the cable, then writes `status.json`, `body.obj` and `measurements.json` back into the same folder.
 `bodyfit/src/bodyfit/capture.py` reads it.
 
 ```
 capture.json
 depth/0000.png …   16-bit grayscale PNG, depth in millimetres, 0 = no reading
 rgb/0000.jpg …     colour frame (half resolution), not used by the fit yet
-mask/0000.png …    optional 8-bit person mask; absent from phone scans
+mask/0000.png …    8-bit person mask (Apple's person segmentation, at depth size); optional
 ```
 
 ## capture.json
@@ -21,15 +21,15 @@ mask/0000.png …    optional 8-bit person mask; absent from phone scans
 | `gravity_device` | phone scans only: mean `CMDeviceMotion.gravity` (device axes) while recording. Used to build `world_from_camera` when that key is absent. The depth maps are in the back camera's native landscape orientation. |
 | `frames[]` | per keyframe (about 4 per second): `depth`, `mask` (path or null), `yaw_hint` (radians or null), `time` (s), and from the phone also `rgb`, `gravity_device` and `vision` |
 | `frames[].vision` | raw `VNHumanBodyPose3DObservation`: `camera_origin_matrix_columns` (4×4, column-major), `left_hip`, `right_hip` (root-relative, metres), `body_height` |
-| `meta.age_years` | age the user entered. Pins Anny's age parameter. |
+| `meta.age_years` | optional age in years. Pins Anny's age parameter; without it bodyfit uses a typical adult age (35). |
 
 ## What bodyfit derives
 
-- **Person mask** (`segment.py`): everything above the floor and within 60 cm of where the person stands.
+- **Person mask** (`segment.py`), only when the phone sent none: the depth-continuous region above the floor around the nearest point in the middle of the picture.
 - **Turn angle per frame** (`turn.py`): from the Vision hip axis. All 8 axis-sign conventions are tried, and the one that best matches the depth wins. If there is no Vision data, the angles come from depth alone, scored against an average body with a Viterbi turn sequence.
 
-Scanning protocol, as the app speaks it:
+Scanning protocol, as the app speaks it (it checks distance, whole-body framing and arm position before recording):
 
-1. Phone upright at waist height, person about 2 m away.
-2. Tight clothing, arms slightly out from the body.
-3. Start facing the phone, then turn slowly to the left, one full turn, over 30 s.
+1. Phone upright at waist height, person about 2 m away, whole body in view.
+2. Tight clothing, hands empty, arms straight and out like an upside-down V.
+3. Start facing the phone, then turn slowly to the left, one full turn, over 20 s.

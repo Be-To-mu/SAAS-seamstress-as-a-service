@@ -6,8 +6,9 @@ import UIKit
 import Vision
 
 /// Writes one scan in the bodyfit capture format (docs/capture-format.md):
-/// capture.json + depth/NNNN.png (16-bit millimetres) + rgb/NNNN.jpg.
-/// Masks and turn angles are left to bodyfit; Vision's raw 3D pose goes along as a hint.
+/// capture.json + depth/NNNN.png (16-bit millimetres) + mask/NNNN.png (Apple's
+/// person segmentation, at depth size) + rgb/NNNN.jpg. Turn angles are left to
+/// bodyfit; Vision's raw 3D pose goes along as a hint.
 final class BundleWriter {
     let folder: URL
     private var frames: [[String: Any]] = []
@@ -20,7 +21,7 @@ final class BundleWriter {
     init(folder: URL, start: CMTime) throws {
         self.folder = folder
         self.start = start
-        for sub in ["depth", "rgb"] {
+        for sub in ["depth", "mask", "rgb"] {
             try FileManager.default.createDirectory(at: folder.appending(path: sub), withIntermediateDirectories: true)
         }
     }
@@ -34,6 +35,7 @@ final class BundleWriter {
         let (w, h) = (CVPixelBufferGetWidth(map), CVPixelBufferGetHeight(map))
         try writeDepthPNG(map, to: folder.appending(path: "depth/\(name).png"))
         try writeJPEG(pixels, to: folder.appending(path: "rgb/\(name).jpg"))
+        let hasMask = (try? writeMask(pixels, width: w, height: h, to: folder.appending(path: "mask/\(name).png"))) != nil
 
         if intrinsics == nil, let cal = depth.cameraCalibrationData {
             // Intrinsics are given for the full sensor; scale them to the depth map.
@@ -48,7 +50,7 @@ final class BundleWriter {
 
         var entry: [String: Any] = [
             "depth": "depth/\(name).png",
-            "mask": NSNull(),
+            "mask": hasMask ? "mask/\(name).png" as Any : NSNull(),
             "yaw_hint": NSNull(),
             "rgb": "rgb/\(name).jpg",
             "time": CMTimeGetSeconds(time - start),
@@ -58,7 +60,7 @@ final class BundleWriter {
         frames.append(entry)
     }
 
-    func finish(ageYears: Double) throws {
+    func finish() throws {
         let n = Double(max(frames.count, 1))
         let g = gravitySum / n
         let doc: [String: Any] = [
@@ -69,7 +71,6 @@ final class BundleWriter {
             "sensor_orientation": "landscape_native",
             "frames": frames,
             "meta": [
-                "age_years": ageYears,
                 "app": "Seamstress iOS 0.1",
                 "device": UIDevice.current.model,
                 "captured": ISO8601DateFormatter().string(from: Date()),
@@ -105,6 +106,24 @@ final class BundleWriter {
               let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
         else { throw CocoaError(.fileWriteUnknown) }
         CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
+    }
+
+    /// Apple's person segmentation, scaled to the depth map (same 4:3 frame).
+    private func writeMask(_ pixels: CVPixelBuffer, width: Int, height: Int, to url: URL) throws {
+        let request = VNGeneratePersonSegmentationRequest()
+        request.qualityLevel = .balanced
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        try VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up, options: [:]).perform([request])
+        guard let mask = request.results?.first?.pixelBuffer else { throw CocoaError(.fileWriteUnknown) }
+        let image = CIImage(cvPixelBuffer: mask)
+        let scaled = image.transformed(by: CGAffineTransform(scaleX: CGFloat(width) / image.extent.width,
+                                                             y: CGFloat(height) / image.extent.height))
+        guard let cg = ciContext.createCGImage(scaled, from: CGRect(x: 0, y: 0, width: width, height: height),
+                                               format: .L8, colorSpace: CGColorSpaceCreateDeviceGray()),
+              let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
+        else { throw CocoaError(.fileWriteUnknown) }
+        CGImageDestinationAddImage(dest, cg, nil)
         guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
     }
 

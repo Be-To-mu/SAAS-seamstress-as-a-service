@@ -16,21 +16,17 @@ import torch
 
 PHENOTYPES = ("gender", "age", "muscle", "weight", "height", "proportions")
 
-# Joints the fitter may rotate; everything else stays in the rest A-pose.
+# Joints the fitter may rotate to line the scan up; everything else stays in the
+# rest A-pose. Pose is a nuisance here: results are shown and measured in the A-pose.
 POSE_BONES = (
     "spine03",
     "spine01",
-    "neck01",
-    "clavicle.L",
-    "clavicle.R",
     "upperarm01.L",
     "upperarm01.R",
     "lowerarm01.L",
     "lowerarm01.R",
     "upperleg01.L",
     "upperleg01.R",
-    "lowerleg01.L",
-    "lowerleg01.R",
 )
 
 # Joints the measurement code uses as landmarks.
@@ -72,11 +68,37 @@ def age_param(years: float) -> float:
     return float(np.interp(years, years_anchors, param_anchors))
 
 
+# The MakeHuman local changes the fit uses. Building Anny with only these (not all
+# 254) gives the same bodies with the others at zero, and is ~1.8x faster.
+MEASURE_CHANGES = (
+    "measure-upperarm-length-incr",
+    "measure-upperarm-circ-incr",
+    "measure-lowerarm-length-incr",
+    "measure-ankle-circ-incr",
+    "measure-wrist-circ-incr",
+    "measure-calf-circ-incr",
+    "measure-lowerleg-height-incr",
+    "measure-upperleg-height-incr",
+    "measure-knee-circ-incr",
+    "measure-thigh-circ-incr",
+    "measure-neck-circ-incr",
+    "measure-neck-height-incr",
+    "measure-underbust-circ-incr",
+    "measure-napetowaist-dist-incr",
+    "measure-waisttohip-dist-incr",
+    "measure-shoulder-dist-incr",
+    "measure-hips-circ-incr",
+    "measure-waist-circ-incr",
+    "measure-frontchest-dist-incr",
+    "measure-bust-circ-incr",
+)
+
+
 @functools.cache
 def _load_anny():
     import anny
 
-    return anny.Anny(local_changes="default").to(dtype=torch.float32)
+    return anny.Anny(local_changes=list(MEASURE_CHANGES)).to(dtype=torch.float32)
 
 
 @dataclass
@@ -99,7 +121,8 @@ class BodyModel:
     def __init__(self):
         self.anny = _load_anny()
         self.faces = self.anny.faces.detach().cpu().numpy()
-        self.change_labels = [l for l in self.anny.local_change_labels if l.startswith("measure-")]
+        self.change_labels = list(self.anny.local_change_labels)
+        assert sorted(self.change_labels) == sorted(MEASURE_CHANGES), self.change_labels
         labels = self.anny.bone_labels
         self.bone_count = self.anny.bone_count
         self.pose_bone_index = torch.tensor([labels.index(b) for b in POSE_BONES])

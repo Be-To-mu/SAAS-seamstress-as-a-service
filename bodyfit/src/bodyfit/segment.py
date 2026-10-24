@@ -1,19 +1,21 @@
-"""Find the person in raw LiDAR depth without image segmentation.
+"""Find the person in raw LiDAR depth when the app sent no person mask.
 
-The phone is level-ish on a stand (gravity is known), the person stands on the
-floor in open space. So: everything above the floor and within a cylinder around
-where they stand is the person.
+Gravity is known and the person stands on the floor in the middle of the
+picture. So: drop everything at floor level, then take the depth-continuous
+region around the nearest point in the centre of the image. Walls and
+furniture behind the person are separated from them by a jump in depth.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from scipy import ndimage
 
 from .capture import Capture, Frame
 
-FLOOR_MARGIN = 0.015  # metres above the floor plane that still count as floor
-RADIUS = 0.6  # metres around the person's standing axis
-MAX_HEIGHT = 2.3
+FLOOR_MARGIN = 0.015  # metres above the floor that still count as floor
+DEPTH_JUMP = 0.06  # neighbouring pixels further apart than this are not connected
+CENTRE = 0.3  # the seed is searched in this central fraction of the image
 
 
 def backproject(capture: Capture, depth: np.ndarray) -> np.ndarray:
@@ -27,41 +29,54 @@ def backproject(capture: Capture, depth: np.ndarray) -> np.ndarray:
 
 
 def floor_height(points: np.ndarray) -> float:
-    """Height of the dominant low horizontal plane (the floor)."""
+    """Height of the lowest dense horizontal layer below the camera (the floor).
+
+    Taking the most common low height instead picks up benches and tables.
+    """
     z = points[..., 2][np.isfinite(points[..., 2])]
-    low = z[z < np.quantile(z, 0.3)]
-    hist, edges = np.histogram(low, bins=np.arange(low.min(), low.max() + 0.01, 0.005))
-    i = int(np.argmax(hist))
+    z = z[z < -0.2]  # the phone stands well above the floor
+    if len(z) < 100:
+        raise ValueError("no floor visible below the phone")
+    hist, edges = np.histogram(z, bins=np.arange(z.min(), z.max() + 0.01, 0.01))
+    dense = np.nonzero(hist >= 0.25 * hist.max())[0]
+    i = dense[0]
     return float(0.5 * (edges[i] + edges[i + 1]))
 
 
-def person_axis(points: np.ndarray, floor: float) -> np.ndarray:
-    """Horizontal (x, y) of the person: the nearest tall cluster in front of the camera."""
-    p = points[np.isfinite(points[..., 2])]
-    torso = p[(p[:, 2] > floor + 0.6) & (p[:, 2] < floor + 1.4) & (np.abs(p[:, 0]) < 1.0)]
-    torso = torso[(torso[:, 1] > 0.8) & (torso[:, 1] < 4.0)]
-    if len(torso) < 50:
-        raise ValueError("no person found 0.8–4 m in front of the camera")
-    near = torso[torso[:, 1] < np.quantile(torso[:, 1], 0.2) + 0.5]  # ignore walls behind
-    return np.median(near[:, :2], axis=0)
+def person_mask(capture: Capture, depth: np.ndarray, floor: float) -> np.ndarray:
+    pts = backproject(capture, depth)
+    valid = np.isfinite(pts[..., 2]) & (pts[..., 2] > floor + FLOOR_MARGIN)
+    # Cut connections across depth jumps (silhouette edges against the room).
+    d = np.where(depth > 0.1, depth, np.inf)
+    barrier = np.zeros_like(valid)
+    barrier[:, :-1] |= np.abs(np.diff(d, axis=1)) > DEPTH_JUMP
+    barrier[:-1, :] |= np.abs(np.diff(d, axis=0)) > DEPTH_JUMP
+    labels, _ = ndimage.label(valid & ~barrier)
+
+    h, w = depth.shape
+    r0, r1 = int(h * (0.5 - CENTRE / 2)), int(h * (0.5 + CENTRE / 2))
+    c0, c1 = int(w * (0.5 - CENTRE / 2)), int(w * (0.5 + CENTRE / 2))
+    centre = np.where(labels[r0:r1, c0:c1] > 0, d[r0:r1, c0:c1], np.inf)
+    if not np.isfinite(centre).any():
+        return np.zeros_like(valid)
+    r, c = np.unravel_index(np.argmin(centre), centre.shape)
+    mask = labels == labels[r0 + r, c0 + c]
+    # Give back the edge pixels the barrier removed; erosion later drops the unreliable ones.
+    return ndimage.binary_dilation(mask) & valid
 
 
 def segment(capture: Capture) -> None:
     """Fill in `frame.mask` for frames recorded without one."""
-    first = backproject(capture, capture.frames[0].depth)
-    floor = floor_height(first)
-    axis = person_axis(first, floor)
+    floor = floor_height(backproject(capture, capture.frames[0].depth))
     for f in capture.frames:
-        if f.mask is not None:
-            continue
-        pts = backproject(capture, f.depth)
-        d = np.linalg.norm(pts[..., :2] - axis, axis=-1)
-        z = pts[..., 2]
-        f.mask = np.isfinite(z) & (z > floor + FLOOR_MARGIN) & (z < floor + MAX_HEIGHT) & (d < RADIUS)
-    capture.meta.setdefault("segmentation", {"floor_z": floor, "axis_xy": axis.tolist()})
+        if f.mask is None:
+            f.mask = person_mask(capture, f.depth, floor)
+    capture.meta.setdefault("segmentation", {"floor_z": floor})
 
 
 def frame_mask(capture: Capture, frame: Frame) -> np.ndarray:
     if frame.mask is None:
         segment(capture)
+    if frame.mask.shape != frame.depth.shape and frame.mask.T.shape == frame.depth.shape:
+        frame.mask = frame.mask.T
     return frame.mask

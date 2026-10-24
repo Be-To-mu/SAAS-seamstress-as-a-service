@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { describeSpec, MAX_REFERENCES } from "@/lib/design";
-import { generateImage, geminiConfigured, geminiImageModelName, type GeminiPart } from "@/lib/gemini";
+import { MAX_REFERENCES } from "@/lib/design";
+import { generateImage, geminiConfigured, geminiImageModelName } from "@/lib/gemini";
+import { previewParts } from "@/lib/previewCore";
 import { specSchema } from "@/pattern/spec";
 
 export const maxDuration = 60;
@@ -29,26 +30,11 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Send the jacket spec, and optionally photos." }, { status: 400 });
   if (!geminiConfigured()) return NextResponse.json({ error: "Pictures need a GEMINI_API_KEY." }, { status: 503 });
 
-  const { spec, images, description, previous, instruction, extras } = parsed.data;
-  const prompt = [
-    `Create one photorealistic product photo of ${describeSpec(spec)}.`,
-    extras.length ? `It also has these added features, which must be clearly visible: ${extras.join("; ")}.` : "",
-    "Show the whole jacket from the front, on an invisible mannequin or laid flat, centred, on a plain light grey studio background, with soft even light. No people, no text, no logos.",
-    "Show every detail listed above exactly, and do not add any pockets, hoods or belts that are not listed.",
-    previous
-      ? `The FIRST attached image is the previous version of this jacket. Keep the same garment, camera angle, background and fabric look, and change only what the description above differs in${instruction ? ` (the designer just asked: "${instruction}")` : ""}.`
-      : "",
-    images.length ? `The ${previous ? "other" : "attached"} reference photos show the style and fabric feel to take inspiration from (${images.length} photo${images.length === 1 ? "" : "s"}). Match the listed details, not the people or the background.` : "",
-    description ? `The designer also wrote: "${description}"` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const parts: GeminiPart[] = [{ text: prompt }];
-  for (const url of [...(previous ? [previous] : []), ...images]) {
-    const m = url.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i);
-    if (!m) return NextResponse.json({ error: "Images must be base64 data URLs." }, { status: 400 });
-    parts.push({ inlineData: { mimeType: m[1], data: m[2] } });
+  let parts;
+  try {
+    parts = previewParts(parsed.data);
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Bad images." }, { status: 400 });
   }
 
   try {

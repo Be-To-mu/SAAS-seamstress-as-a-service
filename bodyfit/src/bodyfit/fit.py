@@ -9,8 +9,12 @@ Adam does the coarse work (it copes with bad initial associations), L-BFGS
 tightens it. Anny's shape space is low-dimensional and has near-equivalent
 parameter combinations, so the parametric fit stalls ~1 mm from the surface;
 real bodies aren't exactly in that space either. A final "detail" step adds a
-smooth per-vertex displacement along the normals (Laplacian-regularised), which
-is what the measurements are taken on.
+smooth per-vertex displacement along the normals (Laplacian-regularised).
+
+Compute goes where measurements are taken (regions.py): most sampled points come
+from the measurement bands, the coarse stages use a subset of frames, stages
+stop once they stop improving, and the detail layer only moves the measured
+regions. The pose is a nuisance: results are shown and measured in the A-pose.
 """
 
 from __future__ import annotations
@@ -26,6 +30,8 @@ from scipy.spatial import cKDTree
 from .capture import Capture
 from .model import PHENOTYPES, POSE_BONES, BodyModel, Shape, age_param
 from .pointcloud import all_points
+from .regions import BandSampler, vertex_band_weights
+from .segment import backproject, floor_height
 from .turn import estimate_yaws, vision_yaws
 
 
@@ -37,33 +43,48 @@ class Stage:
     max_dist: float  # ignore associations further than this
     shape: bool  # also optimise local measure changes + pose (phenotypes always on)
     lbfgs: bool = False
+    frame_step: int = 1  # use every n-th frame
+    name: str = ""
 
 
 STAGES = (
-    Stage(iters=80, lr=0.03, sigma=0.05, max_dist=0.30, shape=False),
-    Stage(iters=200, lr=0.02, sigma=0.015, max_dist=0.08, shape=True),
-    Stage(iters=6, lr=1.0, sigma=0.01, max_dist=0.03, shape=True, lbfgs=True),
+    Stage(iters=80, lr=0.03, sigma=0.05, max_dist=0.30, shape=False, frame_step=3, name="align"),
+    Stage(iters=150, lr=0.02, sigma=0.015, max_dist=0.08, shape=True, frame_step=2, name="shape"),
+    Stage(iters=3, lr=1.0, sigma=0.01, max_dist=0.03, shape=True, lbfgs=True, name="polish"),
 )
+# An Adam stage stops once 25 steps improve the median residual by less than this.
+PLATEAU = 0.01
+PLATEAU_WINDOW = 25
+LBFGS_EVALS = 15
 
 # Vision's body orientation is good to roughly ±10°.
 HINT_SIGMA = math.radians(10.0)
 HINT_WEIGHT = 0.05
+ADULT_AGE_YEARS = 35.0  # used when the app doesn't know the age
 POSE_PRIOR = 1e-4
 CHANGE_PRIOR = 1e-5
+# The fit only pulls the model onto the points, so where there are no points
+# (under the soles, above the head) it could grow freely. Soles go on the floor,
+# which the LiDAR sees well. The crown isn't visible from a phone at waist
+# height, so the head may only reach a little above the highest point seen.
+EXTENT_WEIGHT = 0.01
+EXTENT_SCALE = 0.01  # metres
+TOP_QUANTILE = 0.995  # robust top of the person's points (ignores strays)
+CROWN_SLACK = 0.08  # metres the unseen crown may sit above that (more for tall people)
 # Far from convergence, only trust matches to triangles that face the camera.
 FACING_FILTER_ABOVE = 0.05
 
 
 @dataclass
 class DetailStage:
-    iters: int = 150
+    iters: int = 80
     lr_mm: float = 0.3
     lr_rigid: float = 2e-4
     sigma_mm: float = 20.0
     max_dist_mm: float = 20.0
     smooth: float = 0.5  # weight on the squared Laplacian of the displacement
     shrink: float = 1e-4  # weight pulling unobserved regions back to the parametric surface
-    points_per_frame: int = 800
+    points_per_frame: int = 400  # all from the measurement bands
 
 
 DETAIL = DetailStage()
@@ -83,13 +104,14 @@ class FitResult:
     rest_joints: np.ndarray
     residual_mm: float  # median |point-to-surface| in the last iteration
     seconds: float
+    timings: dict = field(default_factory=dict)  # seconds per phase
     log: list = field(default_factory=list)
 
 
 def fit(
     capture: Capture,
     model: BodyModel | None = None,
-    points_per_frame: int = 250,
+    points_per_frame: int = 100,
     seed: int = 0,
     verbose: bool = False,
     stages: tuple[Stage, ...] = STAGES,
@@ -97,25 +119,53 @@ def fit(
     age_years: float | None = None,
     fixed_phenotypes: dict[str, float] | None = None,
     init: dict | None = None,
+    progress=None,
+    warm: dict | None = None,
 ) -> FitResult:
     """Fit the body model to a capture.
 
-    `age_years` (asked in the app) pins Anny's age parameter: without it, age,
-    height and proportions trade off and the fit settles ~1 cm too big.
-    `fixed_phenotypes` pins other phenotypes the same way. `init` (for tests) overrides start values: phenotypes,
-    changes, pose_rotvec, yaw, translation.
+    Anny's age parameter is always pinned: left free, age, height and
+    proportions trade off and the fit settles ~1 cm too big. For adults it
+    barely varies (18–64 years → 0.77–0.83), so without `age_years` a typical
+    adult age is used. `fixed_phenotypes` pins other phenotypes the same way.
+    `init` (for tests) overrides start values: phenotypes, changes,
+    pose_rotvec, yaw, translation. `warm` ({"shape": Shape JSON dict, "pose_rotvec"})
+    starts the shape and pose from an earlier fit of the same person, so the
+    stages converge sooner. `progress(step)` is called as each phase starts.
     """
     t_start = time.time()
+    timings: dict[str, float] = {}
+    tick = time.perf_counter()
+
+    def phase(name: str | None) -> None:
+        nonlocal tick
+        now = time.perf_counter()
+        if timings.get("_current"):
+            timings[timings["_current"]] = round(now - tick, 1)
+        tick = now
+        timings["_current"] = name
+        if name and progress:
+            progress(name)
+
+    phase("prepare")
     model = model or BodyModel()
     torch.manual_seed(seed)
     fixed = dict(fixed_phenotypes or {})
-    if age_years is not None:
-        fixed["age"] = age_param(age_years)
+    fixed.setdefault("age", age_param(age_years if age_years is not None else ADULT_AGE_YEARS))
     prob = _Problem(capture, model, points_per_frame, seed, fixed)
     p = prob.initial_params(init)
+    if warm and not init:
+        with torch.no_grad():
+            ph, ch = model.shape_tensors(Shape(warm["shape"]["phenotypes"], warm["shape"].get("changes", {})))
+            p["ph"].copy_(torch.logit(ph.clamp(1e-4, 1 - 1e-4)))
+            p["ch"].copy_(torch.atanh(ch.clamp(-0.999, 0.999)))
+            pose = torch.as_tensor(np.asarray(warm["pose_rotvec"]), dtype=torch.float32).reshape(1, -1, 3)
+            if pose.shape == p["pose"].shape:
+                p["pose"].copy_(pose)
 
     log = []
     for si, st in enumerate(stages):
+        phase(st.name or f"stage{si}")
         groups = [{"params": [p["yaw"], p["trans"]], "lr": st.lr}, {"params": [p["ph"]], "lr": st.lr * 2}]
         if st.shape:
             groups += [{"params": [p["ch"]], "lr": st.lr * 2}, {"params": [p["pose"]], "lr": st.lr}]
@@ -123,18 +173,18 @@ def fit(
         if st.lbfgs:
             flat = [t for g in groups for t in g["params"]]
             for it in range(st.iters):
-                sample = prob.sample(points_per_frame * 2)
-                opt = torch.optim.LBFGS(flat, lr=st.lr, max_iter=20, line_search_fn="strong_wolfe")
+                sample = prob.sample(points_per_frame * 2, st.frame_step)
+                opt = torch.optim.LBFGS(flat, lr=st.lr, max_iter=LBFGS_EVALS, line_search_fn="strong_wolfe")
 
                 def closure():
                     opt.zero_grad()
-                    loss, _ = prob.loss(p, st, sample)
+                    loss, _ = prob.loss(p, st, *sample)
                     loss.backward()
                     return loss
 
                 opt.step(closure)
                 with torch.no_grad():
-                    loss, res = prob.loss(p, st, sample)
+                    loss, res = prob.loss(p, st, *sample)
                 log.append({"stage": si, "iter": it, "loss": loss.item(), "residual_mm": res})
                 if verbose:
                     print(f"stage {si} lbfgs {it} loss {loss.item():.5f} residual {res:.2f} mm")
@@ -142,16 +192,21 @@ def fit(
 
         opt = torch.optim.Adam(groups)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=st.iters, eta_min=st.lr * 0.1)
+        history = []
         for it in range(st.iters):
             opt.zero_grad()
-            loss, res = prob.loss(p, st, prob.sample(points_per_frame))
+            loss, res = prob.loss(p, st, *prob.sample(points_per_frame, st.frame_step))
             loss.backward()
             opt.step()
             sched.step()
-            if it % 25 == 0 or it == st.iters - 1:
+            history.append(res)
+            done = _plateaued(history)
+            if it % 25 == 0 or it == st.iters - 1 or done:
                 log.append({"stage": si, "iter": it, "loss": loss.item(), "residual_mm": res})
                 if verbose:
                     print(f"stage {si} it {it:3d} loss {loss.item():.4f} residual {res:.2f} mm")
+            if done:
+                break
 
     with torch.no_grad():
         ph, ch = prob.phenotypes(p), torch.tanh(p["ch"])
@@ -159,8 +214,11 @@ def fit(
     posed, rest = out["vertices"][0], out["rest_vertices"][0]
     disp = torch.zeros(len(posed))
     if detail is not None and detail.iters > 0:
+        phase("detail")
         disp, res = prob.refine_detail(posed, p, detail, verbose)
         log.append({"stage": "detail", "residual_mm": res})
+    phase(None)
+    timings.pop("_current", None)
     with torch.no_grad():
         posed = posed + 1e-3 * disp[:, None] * _vertex_normals(posed, prob.faces)
         rest = rest + 1e-3 * disp[:, None] * _vertex_normals(rest, prob.faces)
@@ -177,8 +235,17 @@ def fit(
         rest_joints=out["rest_joints"][0].numpy(),
         residual_mm=log[-1]["residual_mm"],
         seconds=time.time() - t_start,
+        timings=timings,
         log=log,
     )
+
+
+def _plateaued(history: list[float]) -> bool:
+    w = PLATEAU_WINDOW
+    if len(history) < 2 * w:
+        return False
+    before, after = np.median(history[-2 * w:-w]), np.median(history[-w:])
+    return after > before * (1 - PLATEAU)
 
 
 class _Problem:
@@ -197,6 +264,13 @@ class _Problem:
         if len(self.keep) < 8:
             raise ValueError(f"only {len(self.keep)} usable frames")
         self.clouds = [torch.tensor(clouds[i], dtype=torch.float32) for i in self.keep]
+        floor = capture.meta.get("segmentation", {}).get("floor_z")
+        if floor is None:
+            floor = floor_height(backproject(capture, capture.frames[self.keep[0]].depth))
+        z = np.concatenate([clouds[i][:, 2] for i in self.keep])
+        self.floor_z = float(floor)
+        self.top_z = float(np.quantile(z, TOP_QUANTILE))
+        self.sampler = BandSampler([clouds[i] for i in self.keep], floor, seed, top=self.top_z)
         hints = [capture.frames[i].yaw_hint for i in self.keep]
         if all(h is not None for h in hints):
             yaws = np.unwrap(np.asarray(hints, dtype=np.float64))
@@ -243,16 +317,21 @@ class _Problem:
         ph = torch.sigmoid(p["ph"])
         return torch.where(self.fixed_mask, self.fixed_values, ph)
 
-    def sample(self, per_frame: int) -> torch.Tensor:
-        """(N,S,3) random points from every frame."""
-        return torch.stack([c[self.rng.integers(0, len(c), per_frame)] for c in self.clouds])
+    def sample(self, per_frame: int, frame_step: int = 1, band_share: float | None = None):
+        """(frames, (N',S,3) points): mostly from the measurement bands, every n-th frame."""
+        offset = int(self.rng.integers(0, frame_step))
+        frames = torch.arange(offset, len(self.clouds), frame_step)
+        share = {} if band_share is None else {"band_share": band_share}
+        pts = torch.stack([self.clouds[i][self.sampler.indices(int(i), per_frame, **share)] for i in frames])
+        return frames, pts
 
-    def residuals(self, verts, p, p_w, max_dist, facing_filter):
+    def residuals(self, verts, p, frames, p_w, max_dist, facing_filter):
         """Signed point-to-surface distances (metres) of usable points."""
         per_frame = p_w.shape[1]
-        rot = _rot_z(p["yaw"])  # (N,3,3) body → world
-        p_b = torch.einsum("nsk,nkj->nsj", p_w - p["trans"][:, None], rot).reshape(-1, 3)
-        cam_b = torch.einsum("nk,nkj->nj", -p["trans"], rot).repeat_interleave(per_frame, 0)
+        yaw, trans = p["yaw"][frames], p["trans"][frames]
+        rot = _rot_z(yaw)  # (N',3,3) body → world
+        p_b = torch.einsum("nsk,nkj->nsj", p_w - trans[:, None], rot).reshape(-1, 3)
+        cam_b = torch.einsum("nk,nkj->nj", -trans, rot).repeat_interleave(per_frame, 0)
 
         # Exact distance to the triangles around the nearest vertex.
         _, nn = cKDTree(verts.detach().numpy()).query(p_b.detach().numpy())
@@ -267,10 +346,17 @@ class _Problem:
             ok &= ((cam_b - p_b) * n_best).sum(-1).detach() > 0
         return r[ok]
 
-    def loss(self, p: dict, st: Stage, p_w: torch.Tensor) -> tuple[torch.Tensor, float]:
+    def loss(self, p: dict, st: Stage, frames, p_w: torch.Tensor) -> tuple[torch.Tensor, float]:
         out = self.model.forward(self.phenotypes(p), torch.tanh(p["ch"]), p["pose"])
-        r = self.residuals(out["vertices"][0], p, p_w, st.max_dist, st.max_dist > FACING_FILTER_ABOVE)
+        r = self.residuals(out["vertices"][0], p, frames, p_w, st.max_dist, st.max_dist > FACING_FILTER_ABOVE)
         data = _robust(r, st.sigma).mean()
+
+        # Soles on the floor, crown at the top of the scan (z is unchanged by the yaw).
+        verts_z = out["vertices"][0][:, 2]
+        tz = p["trans"][frames, 2].mean()  # only frames fitted in this step; the rest may still be rough
+        above = torch.relu(verts_z.max() + tz - (self.top_z + CROWN_SLACK))
+        extent = (verts_z.min() + tz - self.floor_z) ** 2 + above**2
+        data = data + EXTENT_WEIGHT * extent / EXTENT_SCALE**2
 
         yaw = p["yaw"]
         reg = CHANGE_PRIOR * p["ch"].pow(2).mean() + POSE_PRIOR * p["pose"].pow(2).mean()
@@ -281,9 +367,10 @@ class _Problem:
         return data + reg, float(r.detach().abs().median()) * 1000
 
     def refine_detail(self, base, p, st: DetailStage, verbose=False) -> tuple[torch.Tensor, float]:
-        """Per-vertex displacement (mm) along the normals of the parametric fit."""
+        """Per-vertex displacement (mm) along the normals, limited to the measured regions."""
         base = base.detach()
         normals = _vertex_normals(base, self.faces)
+        weight = torch.as_tensor(vertex_band_weights(base.numpy(), self.model.faces), dtype=torch.float32)
         lap = _laplacian(self.faces, len(base))
         # Frame transforms stay free: a slightly-too-big parametric body and frames
         # shifted away from the camera fit almost equally well, and only with the
@@ -295,8 +382,9 @@ class _Problem:
         res = float("nan")
         for it in range(st.iters):
             opt.zero_grad()
-            verts = base + 1e-3 * disp[:, None] * normals
-            r_mm = 1e3 * self.residuals(verts, rigid, self.sample(st.points_per_frame), st.max_dist_mm * 1e-3, False)
+            verts = base + 1e-3 * (weight * disp)[:, None] * normals
+            frames, pts = self.sample(st.points_per_frame, band_share=1.0)
+            r_mm = 1e3 * self.residuals(verts, rigid, frames, pts, st.max_dist_mm * 1e-3, False)
             ld = torch.sparse.mm(lap, disp[:, None])[:, 0]
             loss = _robust(r_mm, st.sigma_mm).mean() + st.smooth * ld.pow(2).mean() + st.shrink * disp.pow(2).mean()
             loss.backward()
@@ -308,7 +396,7 @@ class _Problem:
         with torch.no_grad():
             p["yaw"].copy_(rigid["yaw"])
             p["trans"].copy_(rigid["trans"])
-        return disp.detach(), res
+        return (weight * disp).detach(), res
 
 
 def _vertex_normals(vertices: torch.Tensor, faces: torch.Tensor) -> torch.Tensor:

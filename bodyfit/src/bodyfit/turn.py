@@ -14,10 +14,13 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial import cKDTree
 
-GRID_DEG = 5.0
+GRID_DEG = 10.0  # the fit refines angles to well under a degree
 MAX_STEP_DEG = 30.0  # most the person turns between two kept frames
 TRIM = 0.8  # score with the best-matching 80% of points
 VISIBLE_OFFSET = 0.10
+# Sanity limits for Vision-derived turn angles.
+MAX_HIP_TILT = 0.2
+MIN_TURN_DEG, MAX_TURN_DEG = 250.0, 500.0
 
 
 def _rot_z(a):
@@ -25,26 +28,34 @@ def _rot_z(a):
     return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
 
 
-def yaw_costs(clouds: list[np.ndarray], body: np.ndarray, max_points: int = 600, seed: int = 0) -> np.ndarray:
-    """(N, K) trimmed mean distance of each frame's points to `body` at each grid yaw."""
+def yaw_costs(clouds: list[np.ndarray], body: np.ndarray, max_points: int = 300, seed: int = 0) -> np.ndarray:
+    """(N, K) trimmed mean distance of each frame's points to `body` at each grid yaw.
+
+    All grid yaws of a frame are scored together: one k-d tree query per ICP step
+    instead of one per yaw.
+    """
     rng = np.random.default_rng(seed)
     tree = cKDTree(body)
     grid = np.radians(np.arange(0, 360, GRID_DEG))
+    rots = np.stack([_rot_z(a) for a in grid])  # (K,3,3)
     out = np.empty((len(clouds), len(grid)))
     for i, c in enumerate(clouds):
         p = c[rng.choice(len(c), min(max_points, len(c)), replace=False)]
         to_camera = -p.mean(0) / np.linalg.norm(p.mean(0))  # camera sits at the world origin
-        for k, yaw in enumerate(grid):
-            # Body → world is Rz(yaw) x + t, so world → body is Rz(-yaw)(p - t).
-            q = (p - p.mean(0)) @ _rot_z(yaw)  # row-vector form of Rz(-yaw)
-            # The visible half of the body lies ~10 cm towards the camera from its centre.
-            t = body.mean(0) + VISIBLE_OFFSET * (to_camera @ _rot_z(yaw))
-            for _ in range(5):  # a few translation-only ICP steps
-                d, idx = tree.query(q + t)
-                keep = d <= np.quantile(d, TRIM)
-                t = t + (body[idx[keep]] - (q + t)[keep]).mean(0)
-            d, _ = tree.query(q + t)
-            out[i, k] = np.sort(d)[: int(TRIM * len(d))].mean()
+        # Body → world is Rz(yaw) x + t, so world → body is Rz(-yaw)(p - t).
+        q = np.einsum("sj,kji->ksi", p - p.mean(0), rots)  # (K,S,3), row-vector form of Rz(-yaw)
+        # The visible half of the body lies ~10 cm towards the camera from its centre.
+        t = body.mean(0) + VISIBLE_OFFSET * np.einsum("j,kji->ki", to_camera, rots)  # (K,3)
+        n_keep = int(TRIM * q.shape[1])
+        for _ in range(5):  # a few translation-only ICP steps
+            moved = q + t[:, None]
+            d, idx = tree.query(moved.reshape(-1, 3))
+            d, idx = d.reshape(q.shape[:2]), idx.reshape(q.shape[:2])
+            keep = d <= np.quantile(d, TRIM, axis=1, keepdims=True)
+            delta = (body[idx] - moved) * keep[..., None]
+            t = t + delta.sum(1) / keep.sum(1, keepdims=True)
+        d, _ = tree.query((q + t[:, None]).reshape(-1, 3))
+        out[i] = np.sort(d.reshape(q.shape[:2]), axis=1)[:, :n_keep].mean(1)
     return out
 
 
@@ -75,7 +86,10 @@ def best_sequence(costs: np.ndarray, start_facing: bool = True) -> np.ndarray:
 
 
 def estimate_yaws(clouds: list[np.ndarray], body: np.ndarray, seed: int = 0, start_facing: bool = True) -> np.ndarray:
-    return best_sequence(yaw_costs(clouds, body, seed=seed), start_facing)
+    """Score every 2nd frame, then interpolate the ones in between."""
+    sub = list(range(0, len(clouds), 2))
+    yaws = best_sequence(yaw_costs([clouds[i] for i in sub], body, seed=seed), start_facing)
+    return np.interp(np.arange(len(clouds)), sub, yaws)
 
 
 def vision_yaws(capture, clouds: list[np.ndarray], body: np.ndarray, frames: list[int]) -> np.ndarray | None:
@@ -106,5 +120,13 @@ def vision_yaws(capture, clouds: list[np.ndarray], body: np.ndarray, frames: lis
                 k = np.round(np.degrees(yaw[check]) / GRID_DEG).astype(int) % costs.shape[1]
                 score = costs[np.arange(len(check)), k].mean()
                 if best is None or score < best[0]:
-                    best = (score, yaw)
-    return np.unwrap(best[1])
+                    best = (score, yaw, world)
+    _, yaw, world = best
+    yaw = np.unwrap(yaw)
+    # Hips should be level and the person should turn about once; otherwise
+    # Vision was guessing (e.g. hips out of view) and depth alone does better.
+    tilt = np.median(np.abs(world[:, 2]) / np.linalg.norm(world, axis=1))
+    turn = abs(np.degrees(yaw[-1] - yaw[0]))
+    if tilt > MAX_HIP_TILT or not MIN_TURN_DEG <= turn <= MAX_TURN_DEG:
+        return None
+    return yaw

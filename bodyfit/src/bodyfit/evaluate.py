@@ -16,7 +16,7 @@ def synthetic_trial(
     seed: int,
     settings: SynthSettings = SynthSettings(),
     detail: DetailStage | None = DETAIL,
-    give_age: bool = True,
+    give_age: bool = False,  # the app doesn't ask for age
 ) -> dict:
     rng = np.random.default_rng(seed)
     shape, years = random_shape(model, rng)
@@ -25,9 +25,10 @@ def synthetic_trial(
     ph, ch = model.shape_tensors(shape)
     with torch.no_grad():
         truth = model.forward(ph, ch, torch.tensor(pose[None], dtype=torch.float32))
-    true_m = measure(truth["vertices"][0].numpy(), model.faces, model.landmarks(truth["joints"][0]))
+    # Like the app, compare on the standard A-pose body.
+    true_m = measure(truth["rest_vertices"][0].numpy(), model.faces, model.landmarks(truth["rest_joints"][0]))
     result = fit(capture, model, seed=seed, detail=detail, age_years=years if give_age else None)
-    est_m = measure(result.posed_vertices, model.faces, model.landmarks(result.posed_joints))
+    est_m = measure(result.rest_vertices, model.faces, model.landmarks(result.rest_joints))
     t, e = true_m["measurements_cm"], est_m["measurements_cm"]
     return {
         "seed": seed,
@@ -37,6 +38,7 @@ def synthetic_trial(
         "error_cm": {k: round(e[k] - t[k], 1) for k in DEFINITIONS if e[k] is not None and t[k] is not None},
         "residual_mm": round(result.residual_mm, 2),
         "seconds": round(result.seconds, 1),
+        "timings": result.timings,
     }
 
 

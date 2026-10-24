@@ -24,19 +24,22 @@ LEVEL_TOL = 0.003  # girths within this of the extreme count as "at" the landmar
 DEFINITIONS = {
     "height": "Stature, floor to top of head",
     "neck": "Neck girth, perpendicular to the neck halfway up",
-    "shoulder_width": "Shoulder breadth, acromion to acromion",
+    "shoulder_width": "Shoulder breadth, acromion to acromion (straight)",
+    "shoulder_across_back": "Shoulder, acromion to acromion across the back",
     "bust": "Bust/chest girth, fullest level below the armpits",
     "underbust": "Underbust girth, narrowest level just below the bust",
     "waist": "Waist girth, natural (narrowest) waist",
     "high_hip": "High hip girth, halfway between waist and hip",
     "hip": "Hip girth, fullest level of the seat",
-    "upper_arm": "Upper arm girth, halfway shoulder to elbow (mean L/R)",
+    "upper_arm": "Upper arm (bicep) girth, halfway shoulder to elbow (mean L/R)",
     "wrist": "Wrist girth (mean L/R)",
     "thigh": "Thigh girth, just below the crotch (mean L/R)",
     "knee": "Knee girth at the knee joint (mean L/R)",
     "calf": "Calf girth, fullest level (mean L/R)",
     "arm_length": "Arm length, acromion via elbow to wrist (mean L/R)",
     "back_length": "Back length, nape to waist",
+    "nape_to_hip": "Nape to hip, down the back",
+    "waist_to_hip": "Waist to hip, waist to the fullest part of the seat",
     "rise": "Body rise, waist to crotch",
     "inseam": "Inside leg, crotch to floor",
     "outseam": "Outside leg, waist to floor",
@@ -72,6 +75,17 @@ class Slicer:
     def girth(self, origin, normal, point=None) -> float | None:
         loop = self.loop_around(origin, normal, point)
         return None if loop is None else hull_perimeter(loop)
+
+    def tape(self, origin, normal, point=None) -> np.ndarray | None:
+        """Where the tape lies: the slice's convex hull, as a closed 3D polyline."""
+        origin = np.asarray(origin, float)
+        normal = np.asarray(normal, float) / np.linalg.norm(normal)
+        loop = self.loop_around(origin, normal, point)
+        if loop is None:
+            return None
+        hull = loop[ConvexHull(loop).vertices]
+        pts = origin + hull @ _plane_basis(normal)
+        return np.vstack([pts, pts[:1]])
 
 
 def measure(vertices: np.ndarray, faces: np.ndarray, joints: dict[str, np.ndarray]) -> dict:
@@ -127,8 +141,8 @@ def measure(vertices: np.ndarray, faces: np.ndarray, joints: dict[str, np.ndarra
         def leg(z, a=hipj, b=kn):
             return s.girth(np.array([*_lerp_z(a, b, z), z]), up)
 
-        _, calf = scan(kn[2] - 0.6 * (kn[2] - an[2]), kn[2] - 0.1 * (kn[2] - an[2]),
-                       lambda z: leg(z, kn, an), max)
+        calf_z, calf = scan(kn[2] - 0.6 * (kn[2] - an[2]), kn[2] - 0.1 * (kn[2] - an[2]),
+                            lambda z: leg(z, kn, an), max)
         limbs[side] = {
             "upper_arm": s.girth(sh + 0.5 * (el - sh), el - sh),
             "wrist": s.girth(el + 0.95 * (wr - el), wr - el),
@@ -136,6 +150,7 @@ def measure(vertices: np.ndarray, faces: np.ndarray, joints: dict[str, np.ndarra
             "knee": leg(kn[2], kn, an),
             "calf": calf,
             "arm_length": np.linalg.norm(acromion[side] - el) + np.linalg.norm(el - wr),
+            "_calf_z": calf_z,
         }
 
     nape_z = _nape_z(vertices, j["neck01"])
@@ -149,6 +164,9 @@ def measure(vertices: np.ndarray, faces: np.ndarray, joints: dict[str, np.ndarra
         "high_hip": high_hip,
         "hip": hip,
         "back_length": nape_z - waist_z,
+        "nape_to_hip": nape_z - hip_z,
+        "waist_to_hip": waist_z - hip_z,
+        "shoulder_across_back": _across_back(s, axis, acromion),
         "rise": waist_z - crotch_z,
         "inseam": crotch_z - floor,
         "outseam": waist_z - floor,
@@ -159,8 +177,46 @@ def measure(vertices: np.ndarray, faces: np.ndarray, joints: dict[str, np.ndarra
     cm = {k: (None if m[k] is None else round(float(m[k]) * 100, 1)) for k in DEFINITIONS}
     levels = {"crotch": crotch_z, "armpit": armpit_z, "bust": bust_z, "underbust": under_z,
               "waist": waist_z, "hip": hip_z}
+
+    # Where each measurement lies on the body, for drawing it.
+    def at_axis(z):
+        return np.array([*axis(z), z])
+
+    tapes = {
+        "bust": [s.tape(at_axis(bust_z), up)],
+        "underbust": [s.tape(at_axis(under_z), up)],
+        "waist": [s.tape(at_axis(waist_z), up)],
+        "high_hip": [s.tape(at_axis(0.5 * (waist_z + hip_z)), up)],
+        "hip": [s.tape(at_axis(hip_z), up)],
+        "neck": [s.tape(neck_mid, j["head"] - j["neck01"])],
+    }
+    for side in "LR":
+        sh, el, wr = j[f"upperarm01.{side}"], j[f"lowerarm01.{side}"], j[f"wrist.{side}"]
+        hipj, kn, an = j[f"upperleg01.{side}"], j[f"lowerleg01.{side}"], j[f"foot.{side}"]
+        cz = limbs[side]["_calf_z"]
+        tapes.setdefault("upper_arm", []).append(s.tape(sh + 0.5 * (el - sh), el - sh))
+        tapes.setdefault("wrist", []).append(s.tape(el + 0.95 * (wr - el), wr - el))
+        tapes.setdefault("thigh", []).append(
+            s.tape(np.array([*_lerp_z(hipj, kn, crotch_z - 0.025), crotch_z - 0.025]), up))
+        tapes.setdefault("knee", []).append(s.tape(np.array([*_lerp_z(kn, an, kn[2]), kn[2]]), up))
+        tapes.setdefault("calf", []).append(s.tape(np.array([*_lerp_z(kn, an, cz), cz]), up))
+    head_top = vertices[np.argmax(vertices[:, 2])]
+    waist_tape = tapes["waist"][0]
+    waist_side = waist_tape[np.argmax(waist_tape[:, 0])] if waist_tape is not None else at_axis(waist_z)
+    waist_back = waist_tape[np.argmax(waist_tape[:, 1])] if waist_tape is not None else at_axis(waist_z)
+    lines = {
+        "height": [head_top, [head_top[0], head_top[1], floor]],
+        "shoulder_width": [acromion["R"], acromion["L"]],
+        "arm_length": [acromion["L"], j["lowerarm01.L"], j["wrist.L"]],
+        "back_length": [[waist_back[0], waist_back[1], nape_z], waist_back],
+        "rise": [at_axis(waist_z), at_axis(crotch_z)],
+        "inseam": [at_axis(crotch_z), [*axis(crotch_z), floor]],
+        "outseam": [waist_side, [waist_side[0], waist_side[1], floor]],
+    }
     return {"measurements_cm": cm,
-            "levels_cm_above_floor": {k: round(float(z - floor) * 100, 1) for k, z in levels.items()}}
+            "levels_cm_above_floor": {k: round(float(z - floor) * 100, 1) for k, z in levels.items()},
+            "tapes": {k: [t for t in v if t is not None] for k, v in tapes.items()},
+            "lines": {k: np.asarray(v, dtype=float) for k, v in lines.items()}}
 
 
 class MeasureError(RuntimeError):
@@ -194,10 +250,33 @@ def _lerp_z(a, b, z):
     return (a + t * (b - a))[:2]
 
 
+def _across_back(s: Slicer, axis, acromion) -> float | None:
+    """Tape over the back of the shoulders, from one acromion to the other."""
+    z = 0.5 * (acromion["L"][2] + acromion["R"][2]) - 0.015
+    centre = np.array([*axis(z), z])
+    loop = s.loop_around(centre, [0, 0, 1])
+    if loop is None:
+        return None
+    hull = loop[ConvexHull(loop).vertices]  # horizontal slice: x, y relative to centre
+    xl, xr = acromion["L"][0] - centre[0], acromion["R"][0] - centre[0]
+    back = hull[(hull[:, 1] >= 0) & (hull[:, 0] >= min(xl, xr)) & (hull[:, 0] <= max(xl, xr))]
+    if len(back) < 2:
+        return None
+    back = back[np.argsort(back[:, 0])]
+    ends = np.array([[min(xl, xr), back[0, 1]], [max(xl, xr), back[-1, 1]]])
+    path = np.vstack([ends[:1], back, ends[1:]])
+    return float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum())
+
+
 def _acromion(vertices, shoulder_joint):
-    d = np.linalg.norm(vertices[:, :2] - shoulder_joint[:2], axis=1)
-    near = vertices[(d < 0.04) & (vertices[:, 2] > shoulder_joint[2])]
-    return near[np.argmax(near[:, 2])]
+    """Shoulder point: the outer end of the shoulder, just above the joint (where a sleeve seam sits)."""
+    side = np.sign(shoulder_joint[0])
+    near = vertices[(vertices[:, 2] > shoulder_joint[2] + 0.025)
+                    & (np.abs(vertices[:, 1] - shoulder_joint[1]) < 0.05)
+                    & (side * vertices[:, 0] > 0)]
+    if not len(near):
+        return shoulder_joint
+    return near[np.argmax(side * near[:, 0])]
 
 
 def _nape_z(vertices, neck_base):

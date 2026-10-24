@@ -95,7 +95,7 @@ def serve(host: str = "0.0.0.0", port: int = 8000, root: str = "scans") -> None:
 
     global ROOT
     ROOT = Path(root)
-    ROOT.mkdir(exist_ok=True)
+    ROOT.mkdir(parents=True, exist_ok=True)
     for state in ROOT.glob("*/state.json"):  # resume fits interrupted by a restart
         if json.loads(state.read_text())["state"] in ("queued", "fitting"):
             jobs.put(state.parent.name)

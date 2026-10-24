@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>BodyfitServiceURL</key>
-	<string>$(BODYFIT_SERVICE_URL)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -22,19 +20,18 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>GeminiAPIKey</key>
+	<string>$(GEMINI_API_KEY)</string>
+	<key>GeminiModel</key>
+	<string>$(GEMINI_MODEL)</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Seamstress uses the camera and LiDAR to make a 3D model of your body.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Seamstress sends scans to the fitting service on your network.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Seamstress uses the motion sensors to know which way is down while scanning.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Seamstress uses photos you pick as references for a garment design.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>
