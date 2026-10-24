@@ -1,0 +1,35 @@
+# Generate Seamstress.xcodeproj with: brew install xcodegen && xcodegen
+name: Seamstress
+options:
+  bundleIdPrefix: io.github.be-to-mu
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  Seamstress:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    sources: [Seamstress]
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: Seamstress/Info.plist
+      properties:
+        CFBundleDisplayName: Seamstress
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiredDeviceCapabilities: [arkit]
+        NSCameraUsageDescription: Seamstress uses the camera and LiDAR to make a 3D model of your body.
+        NSMotionUsageDescription: Seamstress uses the motion sensors to know which way is down while scanning.
+        NSLocalNetworkUsageDescription: Seamstress sends scans to the fitting service on your network.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        BodyfitServiceURL: $(BODYFIT_SERVICE_URL)

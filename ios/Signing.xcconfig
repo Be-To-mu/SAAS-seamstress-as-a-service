@@ -1,0 +1,4 @@
+// Signing team and service URL come from Local.xcconfig (untracked). Copy Local.xcconfig.example to start.
+CODE_SIGN_STYLE = Automatic
+BODYFIT_SERVICE_URL = http:/$()/localhost:8000
+#include? "Local.xcconfig"

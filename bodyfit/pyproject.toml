@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bodyfit"
+version = "0.1.0"
+description = "Fit the Anny body model to an iPhone LiDAR turn scan and take sewing measurements."
+requires-python = ">=3.12"
+dependencies = [
+    "anny>=0.6",
+    "torch>=2.4",
+    "roma>=1.5",
+    "numpy",
+    "scipy",
+    "trimesh",
+    "rtree",
+    "embreex",
+    "pillow",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib"]
+server = ["fastapi", "uvicorn[standard]", "python-multipart"]
+
+[project.scripts]
+bodyfit = "bodyfit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+markers = ["slow: full 20-body recovery benchmark (minutes)"]
+addopts = "-m 'not slow'"
