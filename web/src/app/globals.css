@@ -192,3 +192,11 @@ button.big { width: 100%; padding: 11px 14px; font-size: 15px; margin-top: 10px;
 .seg.family { margin: 0 0 12px; }
 .quickadd { margin-top: 10px; }
 .note.first { margin-top: 0; }
+.body-save { margin-top: 12px; }
+.saved-bodies { margin-top: 10px; }
+.library { margin-top: 18px; padding-top: 16px; }
+.library-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.library-card { display: flex; gap: 10px; align-items: center; width: 100%; margin: 0; padding: 8px; background: #fff; color: var(--ink); border: 1px solid var(--line); text-align: left; font-weight: 400; }
+.library-card img, .library-card .swatch { width: 44px; height: 58px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; }
+.library-card span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.library-card em { font-style: normal; color: var(--muted); font-size: 12px; }

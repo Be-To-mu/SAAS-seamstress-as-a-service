@@ -14,14 +14,26 @@ npm test
 npm run dev                  # http://localhost:3000
 ```
 
-`GEMINI_MODEL` defaults to `gemini-4-argon` (Google DeepMind bounty). Saved garments need `MONGODB_URI`; that is optional.
+`GEMINI_MODEL` defaults to `gemini-4-argon` (Google DeepMind bounty).
+
+## MongoDB Atlas
+
+Add `MONGODB_URI` (and optionally `MONGODB_DB=saas`) to `.env.local`. The app then uses Atlas as the store for:
+
+- **garments** — saved designs, with a Gemini embedding for Vector Search
+- **recipes** — the verified feature recipes, ranked for the pattern-cutter prompt
+- **bodies** — named measurement sets (typed in, or later pasted from a scan)
+
+Without a URI the studio still runs; save and search stay off. Without the Atlas Search indexes, search falls back to cosine ranking of recent documents.
+
+Optional indexes (Atlas → Search): `atlas/indexes.json`. They are 768-dimensional cosine vectors on `embedding`.
 
 ## What it does
 
-1. **Body.** Chest, waist, hip, shoulder, neck, back length, arm, bicep, wrist. These set every piece.
+1. **Body.** Chest, waist, hip, shoulder, neck, back length, arm, bicep, wrist. These set every piece. Save a named body to Atlas and load it later.
 2. **Design.** Photos and/or a description. Gemini picks a garment family and fills a typed spec. Worked examples are in the prompt.
-3. **Style.** Edit the spec by hand. Ready-made features (hood, yoke, colour-block hem, zip pocket) apply without a model call. Free-text features go through Gemini and a seam checker.
-4. **Pattern.** Live SVG, seam report, 1:1 tiled PDF.
+3. **Style.** Edit the spec by hand. Ready-made features (hood, yoke, colour-block hem, zip pocket) apply without a model call. Free-text features go through Gemini and a seam checker. Atlas ranks which recipes to show the model.
+4. **Pattern.** Live SVG, seam report, 1:1 tiled PDF. Save the design to Atlas and search the library.
 
 The picture is an illustration. The pattern comes from the spec and the added features, not from the picture.
 

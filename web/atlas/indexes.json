@@ -1,0 +1,45 @@
+{
+  "note": "Create these in Atlas → Search. The app still works without them: it ranks a recent batch with cosine similarity instead.",
+  "vectorSearch": [
+    {
+      "name": "garment_vector",
+      "collection": "garments",
+      "type": "vectorSearch",
+      "definition": {
+        "fields": [
+          { "type": "vector", "path": "embedding", "numDimensions": 768, "similarity": "cosine" },
+          { "type": "filter", "path": "family" }
+        ]
+      }
+    },
+    {
+      "name": "recipe_vector",
+      "collection": "recipes",
+      "type": "vectorSearch",
+      "definition": {
+        "fields": [
+          { "type": "vector", "path": "embedding", "numDimensions": 768, "similarity": "cosine" },
+          { "type": "filter", "path": "families" }
+        ]
+      }
+    }
+  ],
+  "atlasSearch": [
+    {
+      "name": "garment_text",
+      "collection": "garments",
+      "type": "search",
+      "definition": {
+        "mappings": {
+          "dynamic": false,
+          "fields": {
+            "title": { "type": "string" },
+            "garment": { "type": "string" },
+            "description": { "type": "string" },
+            "family": { "type": "token" }
+          }
+        }
+      }
+    }
+  ]
+}
