@@ -72,6 +72,8 @@ class Device:
         self._devicectl("device", "copy", "from", *self._app_args(), "--source", remote, "--destination", str(local))
 
     def push(self, local: Path, remote: str) -> None:
+        # Never pass --remove-existing-content: it clears far more than `remote`
+        # (it wiped the app's Documents on 2026-10-24).
         self._devicectl("device", "copy", "to", *self._app_args(), "--source", str(local), "--destination", remote)
 
     def push_into(self, files: list[Path], remote_dir: str) -> None:

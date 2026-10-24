@@ -15,12 +15,14 @@ struct Turntable: View {
     var body: some View {
         ZStack {
             Theme.linen
+            if views.isEmpty { MonogramPlaceholder() }
             if let image = image(at: index) {
-                Image(uiImage: image).resizable().scaledToFit().padding(12)
+                Image(uiImage: image).resizable().scaledToFill()
                     .transition(.opacity)
                     .id(index)
             }
         }
+        .clipped()
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 4)

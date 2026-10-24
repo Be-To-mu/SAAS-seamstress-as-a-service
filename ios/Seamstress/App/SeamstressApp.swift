@@ -15,6 +15,7 @@ struct SeamstressApp: App {
 struct RootView: View {
     @StateObject private var profile = BodyProfile()
     @StateObject private var draft = DesignDraft()
+    @StateObject private var wardrobe = WardrobeStore()
     @State private var hasBody = !ScanStore.all().isEmpty
     @State private var scanning = false
     @State private var path = NavigationPath()
@@ -34,14 +35,15 @@ struct RootView: View {
                 }
             } else {
                 NavigationStack(path: $path) {
-                    WardrobeView(onOpen: open, onTryOn: { g in open(g); path.append(Route.tryOn) },
-                                 onNew: { path.append(Route.design) })
+                    WardrobeView(onOpen: open, onNew: { path.append(Route.design) })
                         .navigationDestination(for: Route.self, destination: destination)
                 }
             }
         }
         .environmentObject(profile)
         .environmentObject(draft)
+        .environmentObject(wardrobe)
+        .task { await wardrobe.run() }  // preload the wardrobe as the app starts
         .onAppear(perform: openDebugRoute)
     }
 
@@ -59,20 +61,21 @@ struct RootView: View {
                 path.append(Route.creating)
             }
         case .creating:
-            CreatingView(input: pending) {
+            CreatingView(input: pending, save: autosave) {
                 pending = nil
                 // Replace "creating" with the result, so Back returns to the design page.
                 path.removeLast()
                 path.append(Route.spin)
             }
         case .spin:
-            SpinView(onEdit: { path.append(Route.style) },
+            SpinView(save: autosave, onEdit: { path.append(Route.style) },
                      onTryOn: { path.append(Route.tryOn) },
                      onRedraw: { pending = nil; path.append(Route.creating) })
         case .tryOn:
             TryOnView(onEdit: { path.append(Route.style) },
                       onPattern: { path.append(Route.pattern) },
-                      onSave: save)
+                      onDone: { autosave(); path = NavigationPath() },
+                      save: autosave)
         case .style:
             StyleView { path.append(Route.pattern) }
         case .pattern:
@@ -80,15 +83,20 @@ struct RootView: View {
         }
     }
 
+    /// A garment with its own front goes straight to its views; one without draws them first.
     private func open(_ g: SavedGarment) {
         draft.load(g)
-        path.append(Route.spin)
+        if draft.front == nil {
+            pending = nil
+            path.append(Route.creating)
+        } else {
+            path.append(Route.spin)
+        }
     }
 
-    private func save() {
-        if (try? GarmentStore.save(draft, measurements: profile.webMeasurements)) != nil {
-            path = NavigationPath()
-        }
+    /// Designs are kept as their pictures arrive, so they show in the wardrobe at once.
+    private func autosave() {
+        wardrobe.save(draft, measurements: profile.webMeasurements)
     }
 
     /// Debug builds: `-route <name>` opens that screen, for screenshots in the simulator.

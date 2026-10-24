@@ -54,13 +54,13 @@ struct ResultView: View {
 
     private var waiting: some View {
         VStack(spacing: 18) {
-            Monogram(size: 56, color: Theme.brown)
             if status?.state != "failed" {
+                AtelierProgress()
                 if let progress = status?.progress {
                     ProgressView(value: progress).tint(Theme.brown).frame(maxWidth: 220)
-                } else {
-                    ProgressView().controlSize(.large)
                 }
+            } else {
+                Monogram(size: 56, color: Theme.brown)
             }
             Text(message).font(Theme.body(16)).multilineTextAlignment(.center)
         }

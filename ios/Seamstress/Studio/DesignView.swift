@@ -18,8 +18,9 @@ struct DesignView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Design a garment").titleStyle(24)
-                    Text("add photos of pieces you like").subtitleStyle()
+                    Text("New design").eyebrowStyle()
+                    Text("What shall we make?").titleStyle(30)
+                    Text("Add photos of pieces you admire, then describe what you have in mind.").subtitleStyle(14)
                 }
                 references
             }

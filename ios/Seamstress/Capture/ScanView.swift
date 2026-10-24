@@ -6,6 +6,7 @@ import SwiftUI
 /// read from where the person stands, and everything is spoken too.
 struct ScanView: View {
     @StateObject private var session = ScanSession()
+    @State private var introStep = 0
     var canCancel = false
     let onClose: (URL?) -> Void
 
@@ -56,8 +57,7 @@ struct ScanView: View {
                           hint: session.advice == .good ? nil : adviceText)
                 ProgressView(value: progress).tint(Theme.linen)
                 Button("Stop") { session.stopEarly() }
-                    .buttonStyle(TailoredButtonStyle(filled: false)).frame(width: 160).padding(.top)
-                    .colorScheme(.dark)
+                    .buttonStyle(TailoredButtonStyle(filled: false, onDark: true)).frame(width: 160).padding(.top)
             }
         case .saving:
             ProgressView("Saving…").tint(Theme.cream).frame(maxHeight: .infinity)
@@ -67,40 +67,72 @@ struct ScanView: View {
             VStack(spacing: 16) {
                 Spacer()
                 Text(message).font(Theme.body(17))
-                Button("Close") { onClose(nil) }.buttonStyle(TailoredButtonStyle())
+                Button("Close") { onClose(nil) }.buttonStyle(TailoredButtonStyle(onDark: true))
             }
         }
     }
 
-    private var intro: some View {
-        VStack(alignment: .leading, spacing: 18) {
+    /// Before scanning: first how to prepare (clothing, phone, where to stand), then — after
+    /// "Okay" — how to hold the arms and turn, with Start.
+    @ViewBuilder private var intro: some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Monogram(size: 40)
                 Spacer()
                 if canCancel {
-                    Button { onClose(nil) } label: { Image(systemName: "xmark").font(.title3) }
+                    Button { onClose(nil) } label: { Image(systemName: "xmark").font(.system(size: 17, weight: .light)) }
                 }
             }
-            Text("Scan your body").titleStyle(28)
-            Text("made to measure").subtitleStyle()
+            .padding(.bottom, 28)
+            Text(introStep == 0 ? "Step 1 of 2 · Prepare" : "Step 2 of 2 · Pose").eyebrowStyle(onDark: true)
+            Text(introStep == 0 ? "Your fitting" : "Hold, then turn").titleStyle(34).padding(.top, 8)
             Spacer()
-            HStack(alignment: .center, spacing: 18) {
-                APoseFigure().frame(height: 150)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Arms straight, a little out to the sides, like an upside-down V.")
-                    Text("Hands empty, palms towards your legs.").opacity(0.8)
+            Group {
+                if introStep == 0 { prepare } else { pose }
+            }
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
+        }
+        .animation(.easeInOut(duration: 0.35), value: introStep)
+    }
+
+    private var prepare: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            IntroRow(icon: "tshirt", title: "What to wear",
+                     text: "Close-fitting clothes, such as leggings and a fitted top. Tie long hair up and take off shoes with thick soles.")
+            IntroRow(icon: "iphone", title: "Place the phone",
+                     text: "Stand it upright at waist height, against something steady, in an open space.")
+            IntroRow(icon: "figure.stand", title: "Where to stand",
+                     text: "About two metres from the phone, with your whole body, head to feet, in the picture.")
+            Button("Okay") { introStep = 1 }
+                .buttonStyle(TailoredButtonStyle(onDark: true))
+                .padding(.top, 24)
+        }
+    }
+
+    private var pose: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 22) {
+                APoseFigure().frame(height: 160)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Arms").font(.system(size: 15, weight: .semibold))
+                    Text("Straight and a little away from your sides, like an upside-down V. Hands empty, palms towards your legs.")
+                        .font(Theme.body(15)).lineSpacing(3)
                 }
-                .font(Theme.body(15))
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Wear tight clothing; tie long hair up.", systemImage: "tshirt")
-                Label("Phone upright at waist height, in open space.", systemImage: "iphone")
-                Label("Stand about 2 m away, whole body in view.", systemImage: "figure.stand")
-                Label("Turn slowly to your left for 20 seconds.", systemImage: "arrow.counterclockwise")
+            .padding(.vertical, 16)
+            .hairline(.bottom, onDark: true)
+            IntroRow(icon: "arrow.counterclockwise", title: "Turn",
+                     text: "Start facing the phone. When it says so, turn slowly to your left, all the way round, in about 20 seconds. Keep your arms still.")
+            Text("The phone speaks every step, so you don't need to see the screen.")
+                .font(.system(size: 13)).opacity(0.75).padding(.top, 14)
+            HStack(spacing: 12) {
+                Button("Back") { introStep = 0 }
+                    .buttonStyle(TailoredButtonStyle(filled: false, onDark: true))
+                    .frame(width: 110)
+                Button("Start") { session.begin() }
+                    .buttonStyle(TailoredButtonStyle(onDark: true))
             }
-            .font(Theme.body(14))
-            Button("Start") { session.begin() }
-                .buttonStyle(TailoredButtonStyle())
+            .padding(.top, 20)
         }
     }
 
@@ -164,5 +196,25 @@ struct CameraPreview: UIViewRepresentable {
                 connection.videoRotationAngle = 90
             }
         }
+    }
+}
+
+/// One instruction: icon, short title, a sentence; hairline below.
+private struct IntroRow: View {
+    let icon: String
+    let title: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: icon).font(.system(size: 20, weight: .light)).frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 15, weight: .semibold))
+                Text(text).font(Theme.body(15)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .hairline(.bottom, onDark: true)
     }
 }

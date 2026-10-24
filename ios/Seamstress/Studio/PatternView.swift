@@ -5,6 +5,7 @@ import SwiftUI
 struct PatternView: View {
     @EnvironmentObject private var draft: DesignDraft
     @EnvironmentObject private var profile: BodyProfile
+    @EnvironmentObject private var wardrobe: WardrobeStore
     let onSaved: () -> Void
 
     @State private var pdfURL: URL?
@@ -91,8 +92,9 @@ struct PatternView: View {
 
     private func save() {
         do {
-            let g = try GarmentStore.save(draft, measurements: profile.webMeasurements)
-            draft.savedID = g.id
+            guard wardrobe.save(draft, measurements: profile.webMeasurements) != nil else {
+                throw Engine.Failure(message: "Could not save the garment.")
+            }
             onSaved()
         } catch {
             self.error = error.localizedDescription

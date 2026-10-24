@@ -1,44 +1,42 @@
 import SwiftUI
 
-/// Home: the wardrobe stored in MongoDB (synced to the phone by the Mac).
-/// One garment per screen: swipe up or down to flip through them, drag sideways
-/// to turn the garment around.
+/// Home. Creating a new design comes first; below it, your pieces (the wardrobe,
+/// synced with MongoDB by the Mac), each shown by its generated front picture.
+/// Everything is preloaded by `WardrobeStore` when the app starts.
 struct WardrobeView: View {
+    @EnvironmentObject private var wardrobe: WardrobeStore
     let onOpen: (SavedGarment) -> Void
-    let onTryOn: (SavedGarment) -> Void
     let onNew: () -> Void
 
-    @State private var garments: [SavedGarment] = []
-    @State private var current: String?
-    @State private var cache: [String: [Int: UIImage]] = [:]
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
-        Group {
-            if garments.isEmpty {
-                empty
-            } else {
-                GeometryReader { geo in
-                    ScrollView(.vertical) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(garments) { g in
-                                page(g).frame(width: geo.size.width, height: geo.size.height).id(g.id)
-                            }
-                        }
-                        .scrollTargetLayout()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                hero
+                if !wardrobe.garments.isEmpty {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Your wardrobe").titleStyle(24)
+                        Spacer()
+                        Text("\(wardrobe.garments.count)").font(.caption).foregroundStyle(Theme.sand)
                     }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: $current)
-                    .scrollIndicators(.hidden)
+                    .padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 14)
+                    LazyVGrid(columns: columns, spacing: 22) {
+                        ForEach(wardrobe.garments) { g in
+                            Button { onOpen(g) } label: { PieceTile(garment: g) }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                } else if !wardrobe.loaded {
+                    AtelierProgress(size: 44).frame(maxWidth: .infinity).padding(40)
                 }
             }
+            .foregroundStyle(Theme.brown)
         }
         .background(Theme.cream.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: onNew) { Image(systemName: "plus").font(.system(size: 17, weight: .light)) }
-                    .accessibilityLabel("New design")
-            }
             ToolbarItem(placement: .principal) {
                 Text("Seamstress").font(.system(size: 20, weight: .regular, design: .serif)).tracking(0.5)
             }
@@ -47,64 +45,54 @@ struct WardrobeView: View {
             }
         }
         .toolbarBackground(Theme.cream, for: .navigationBar)
-        .task { await reload() }
     }
 
-    /// One garment: turntable on the taupe ground, then name and two text actions.
-    private func page(_ g: SavedGarment) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Turntable(views: cache[g.id] ?? [:], autoTurn: current == g.id)
-                .frame(maxHeight: .infinity)
-                .onAppear { if cache[g.id] == nil { cache[g.id] = GarmentStore.views(g.id) } }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(g.name).titleStyle(24)
+    /// The main thing to do here.
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Monogram(size: 46, color: Theme.brown).padding(.bottom, 10)
+            Text("Made to measure").eyebrowStyle()
+            Text("Create a new design").titleStyle(36)
+            Text("Bring pieces you admire and a few words. We'll draw it, fit it on you, and cut the pattern to your measurements.")
+                .font(Theme.body(15)).lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onNew) {
+                HStack {
+                    Text("Begin a design")
                     Spacer()
-                    Text("\(index(of: g) + 1) / \(garments.count)").font(.caption).foregroundStyle(Theme.sand)
+                    Image(systemName: "arrow.right").font(.system(size: 14, weight: .light))
                 }
-                Text(Engine.familyLabel(g.family)).subtitleStyle()
-                HStack(spacing: 24) {
-                    Button("Edit") { onOpen(g) }
-                    Button("Try on") { onTryOn(g) }
-                    Spacer()
-                    Text(GarmentStore.isSynced(g.id) ? "Stored" : "Waiting for your Mac")
-                        .font(.caption).foregroundStyle(Theme.sand)
+            }
+            .buttonStyle(TailoredButtonStyle())
+            .padding(.top, 10)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 28).padding(.bottom, 26)
+        .background(Theme.linen)
+    }
+}
+
+/// One piece: its front picture on the taupe ground, then its name.
+private struct PieceTile: View {
+    @EnvironmentObject private var wardrobe: WardrobeStore
+    let garment: SavedGarment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle().fill(Theme.linen)
+                .aspectRatio(0.75, contentMode: .fit)
+                .overlay {
+                    if let front = wardrobe.fronts[garment.id] {
+                        Image(uiImage: front).resizable().scaledToFill().arrives()
+                    } else if wardrobe.drawing.contains(garment.id) {
+                        AtelierProgress(size: 40, caption: "Drawing")
+                    } else {
+                        MonogramPlaceholder()
+                    }
                 }
-                .font(.system(size: 15, weight: .semibold))
-                .underline()
-                .padding(.top, 4)
-            }
-            .foregroundStyle(Theme.brown)
-            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 28)
-            .hairline(.top)
-        }
-    }
-
-    private var empty: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Your wardrobe").titleStyle(30)
-            Text("Garments you design are kept here, ready to turn around, try on and make.")
-                .font(Theme.body(15))
-            Rectangle().fill(Theme.linen).aspectRatio(0.8, contentMode: .fit)
-                .overlay(Image(systemName: "hanger").font(.system(size: 44, weight: .ultraLight)).foregroundStyle(Theme.sand))
-            Button("Design a garment", action: onNew).buttonStyle(TailoredButtonStyle())
-            Spacer()
-        }
-        .foregroundStyle(Theme.brown)
-        .padding(20)
-    }
-
-    private func index(of g: SavedGarment) -> Int { garments.firstIndex(of: g) ?? 0 }
-
-    /// The wardrobe folder changes when the Mac syncs; check every few seconds while open.
-    private func reload() async {
-        while !Task.isCancelled {
-            let now = GarmentStore.all()
-            if now.map(\.id) != garments.map(\.id) {
-                garments = now
-                if current == nil || !now.contains(where: { $0.id == current }) { current = now.first?.id }
-            }
-            try? await Task.sleep(for: .seconds(4))
+                .clipped()
+            Text(garment.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+            Text(Engine.familyLabel(garment.family)).font(.caption).foregroundStyle(Theme.sand).lineLimit(1)
         }
     }
 }

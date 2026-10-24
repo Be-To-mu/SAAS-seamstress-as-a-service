@@ -10,7 +10,8 @@ struct MeasurementsView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Your measurements").titleStyle(22)
+                    Text("Your fitting").eyebrowStyle()
+                    Text("Your measurements").titleStyle(30)
                     Text("Filled in from your scan. Tap a number to change it.").font(Theme.body(14)).opacity(0.8)
                 }
                 .foregroundStyle(Theme.brown)

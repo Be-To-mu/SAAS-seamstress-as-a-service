@@ -6,6 +6,8 @@ struct CreatingView: View {
     @EnvironmentObject private var draft: DesignDraft
     /// The design request from the Design page; nil when redrawing an existing design.
     let input: DesignInput?
+    /// Keeps the design in the wardrobe as its pictures arrive.
+    let save: () -> Void
     let onDone: () -> Void
 
     enum Step: Int { case reading, front, sides, done }
@@ -17,7 +19,8 @@ struct CreatingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Creating your design").titleStyle(28)
+                Text("In the atelier").eyebrowStyle()
+                Text("Creating your design").titleStyle(30)
                 Text(draft.name == "Garment" ? "This takes about half a minute." : draft.name).subtitleStyle(14)
             }
             .padding(20)
@@ -26,12 +29,7 @@ struct CreatingView: View {
                 if draft.front != nil {
                     Turntable(views: draft.views, autoTurn: false)
                 } else {
-                    Rectangle().fill(Theme.linen).overlay {
-                        VStack(spacing: 14) {
-                            Monogram(size: 54, color: Theme.brown)
-                            ProgressView().tint(Theme.brown)
-                        }
-                    }
+                    Rectangle().fill(Theme.linen).overlay { AtelierProgress() }
                 }
             }
             .aspectRatio(0.8, contentMode: .fit)
@@ -79,17 +77,19 @@ struct CreatingView: View {
         error = nil
         defer { running = false }
         do {
+            if input == nil, draft.viewsStale { draft.views = [:] }  // redraw after an edit
             if let input, step == .reading {
                 draft.adopt(try await Gemini.design(input))
                 draft.features = []
                 draft.references = input.images
             }
             step = .front
-            try await draft.drawViews { n in
+            try await draft.drawViews(keepExisting: input == nil && !draft.viewsStale, onFront: save) { n in
                 drawn = n
                 if n >= 1 { step = .sides }
             }
             step = .done
+            save()
             onDone()
         } catch {
             self.error = error.localizedDescription

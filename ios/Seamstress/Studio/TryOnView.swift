@@ -8,7 +8,9 @@ struct TryOnView: View {
     @EnvironmentObject private var draft: DesignDraft
     let onEdit: () -> Void
     let onPattern: () -> Void
-    let onSave: () -> Void
+    let onDone: () -> Void
+    /// Keeps the try-on with the garment in the wardrobe.
+    let save: () -> Void
 
     @AppStorage("tryOnConsent") private var consent = false
     @State private var person: UIImage?
@@ -21,13 +23,9 @@ struct TryOnView: View {
             ZStack {
                 Theme.linen
                 if let tryOn = draft.tryOn {
-                    Image(uiImage: tryOn).resizable().scaledToFit()
+                    Image(uiImage: tryOn).resizable().scaledToFit().arrives()
                 } else if busy {
-                    VStack(spacing: 14) {
-                        Monogram(size: 54, color: Theme.brown)
-                        ProgressView().tint(Theme.brown)
-                        Text("Dressing you in your \(draft.name.lowercased())…").font(Theme.body(15))
-                    }
+                    AtelierProgress(caption: "Fitting your \(draft.name.lowercased()) on you…")
                 } else if !consent {
                     consentCard
                 } else if person == nil {
@@ -54,7 +52,7 @@ struct TryOnView: View {
                 Button { draft.tryOn = nil; Task { await dress() } } label: { Text("Try again") }
                     .buttonStyle(TailoredButtonStyle(filled: false))
                     .disabled(busy || person == nil || !consent)
-                Button("Save to wardrobe", action: onSave).buttonStyle(TailoredButtonStyle())
+                Button("Done", action: onDone).buttonStyle(TailoredButtonStyle())
             }
             .padding()
             .background(Theme.cream.opacity(0.95))
@@ -115,6 +113,7 @@ struct TryOnView: View {
         defer { busy = false }
         do {
             draft.tryOn = try await Gemini.tryOn(TryOnInput(spec: draft.spec, person: personURL, garment: garmentURL))
+            save()
         } catch {
             self.error = error.localizedDescription
         }

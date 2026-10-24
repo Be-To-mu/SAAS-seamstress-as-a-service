@@ -5,6 +5,7 @@ import SwiftUI
 struct SpinView: View {
     @EnvironmentObject private var draft: DesignDraft
     @EnvironmentObject private var profile: BodyProfile
+    let save: () -> Void
     let onEdit: () -> Void
     let onTryOn: () -> Void
     let onRedraw: () -> Void
@@ -24,15 +25,15 @@ struct SpinView: View {
                 Turntable(views: draft.views)
                     .aspectRatio(0.8, contentMode: .fit)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(draft.name).titleStyle(26)
-                    Text(Engine.familyLabel(draft.family)).subtitleStyle()
+                    Text("\(Engine.familyLabel(draft.family)) · made to measure").eyebrowStyle()
+                    Text(draft.name).titleStyle(30)
                     if let c = composed {
-                        Text(c.description.capitalizedFirst).font(Theme.body(15))
+                        Text(c.description.withoutColourCodes.capitalizedFirst).font(Theme.body(15)).lineSpacing(3)
                         ForEach(c.stats.prefix(3), id: \.self) { s in
                             LabeledContent(s.label, value: s.value).font(Theme.body(14)).hairline(.bottom).padding(.bottom, 6)
                         }
                     }
-                    Text("Drag the garment to turn it around.").font(.caption).foregroundStyle(Theme.sand)
+                    Text("Drag the garment to turn it around.").font(.caption).foregroundStyle(Theme.sand).padding(.top, 4)
                 }
                 .padding(20)
             }
@@ -43,6 +44,12 @@ struct SpinView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { Button("Edit", action: onEdit) }
+        }
+        .task {
+            // Opened from the wardrobe with only some views: draw the rest in the background.
+            guard draft.front != nil, draft.views.count < DesignDraft.angles.count, !draft.viewsStale else { return }
+            try? await draft.drawViews(keepExisting: true) { _ in }
+            save()
         }
         .safeAreaInset(edge: .bottom) {
             Button("See it on me", action: onTryOn)

@@ -59,23 +59,32 @@ final class DesignDraft: ObservableObject {
         savedID = g.id
         views = GarmentStore.views(g.id)
         tryOn = GarmentStore.tryOn(g.id)
+        references = GarmentStore.reference(g.id)?.dataURL().map { [$0] } ?? []
+        words = ""
         viewsStale = false
     }
 
     /// Draw the turnaround: the front first (from the spec), then the other angles from the front,
     /// a few at a time. `progress` gets the number of views done.
-    func drawViews(progress: @escaping (Int) -> Void) async throws {
+    func drawViews(keepExisting: Bool = false, onFront: (() -> Void)? = nil,
+                   progress: @escaping (Int) -> Void) async throws {
         let extras = features.map(\.request)
         let words = self.words.trimmingCharacters(in: .whitespacesAndNewlines)
-        views = [:]
-        let front = try await Gemini.picture(PictureInput(spec: spec, images: references,
+        if !keepExisting { views = [:] }
+        let front: UIImage
+        if let existing = views[0] {
+            front = existing
+        } else {
+            front = try await Gemini.picture(PictureInput(spec: spec, images: references,
                                                           description: words.isEmpty ? nil : words, extras: extras))
-        views[0] = front
-        progress(1)
+            views[0] = front
+        }
+        onFront?()
+        progress(views.count)
         guard let frontURL = front.dataURL() else { return }
         let spec = self.spec
-        let rest = Self.angles.filter { $0 != 0 }
-        var done = 1
+        let rest = Self.angles.filter { views[$0] == nil }
+        var done = views.count
         var firstError: Error?
         // Three at a time keeps it quick without tripping rate limits.
         for batch in stride(from: 0, to: rest.count, by: 3).map({ Array(rest[$0..<min($0 + 3, rest.count)]) }) {
@@ -122,7 +131,6 @@ struct SavedGarment: Codable, Identifiable, Hashable {
     var color: Color { Color(hex: spec["clothColor"]?.string ?? "#a9794a") }
 }
 
-@MainActor
 enum GarmentStore {
     static var root: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appending(path: "garments")
@@ -144,7 +152,7 @@ enum GarmentStore {
 
     static func get(_ id: String) -> SavedGarment? { all().first { $0.id == id } }
 
-    @discardableResult
+    @MainActor @discardableResult
     static func save(_ draft: DesignDraft, measurements: [String: Double]) throws -> SavedGarment {
         let id = draft.savedID ?? UUID().uuidString.lowercased()
         let dir = folder(id)
@@ -171,13 +179,39 @@ enum GarmentStore {
         for f in files {
             if let angle = Int(f.deletingPathExtension().lastPathComponent), let img = UIImage(contentsOfFile: f.path) { out[angle] = img }
         }
-        if out.isEmpty, let thumb = UIImage(contentsOfFile: folder(id).appending(path: "thumbnail.jpg").path) { out[0] = thumb }
         return out
     }
 
-    static func front(_ id: String) -> UIImage? {
-        UIImage(contentsOfFile: folder(id).appending(path: "views/0.jpg").path)
-            ?? UIImage(contentsOfFile: folder(id).appending(path: "thumbnail.jpg").path)
+    /// The garment's own front view (never the reference photo).
+    static func frontFile(_ id: String) -> URL? {
+        let url = folder(id).appending(path: "views/0.jpg")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    static func front(_ id: String) -> UIImage? { frontFile(id).flatMap { UIImage(contentsOfFile: $0.path) } }
+
+    /// The photo the design started from (web garments keep only this).
+    static func reference(_ id: String) -> UIImage? {
+        UIImage(contentsOfFile: folder(id).appending(path: "reference.jpg").path)
+    }
+
+    /// Store a newly drawn front; the Mac uploads the garment again.
+    static func setFront(_ id: String, _ image: UIImage) {
+        let dir = folder(id).appending(path: "views")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? image.jpegData(compressionQuality: 0.85)?.write(to: dir.appending(path: "0.jpg"))
+        try? FileManager.default.removeItem(at: folder(id).appending(path: "synced.json"))
+    }
+
+    /// Changes when garments are added, removed, synced or get new pictures.
+    static func signature() -> String {
+        let fm = FileManager.default
+        let ids = ((try? fm.contentsOfDirectory(atPath: root.path)) ?? []).sorted()
+        return ids.map { id in
+            let views = (try? fm.contentsOfDirectory(atPath: folder(id).appending(path: "views").path))?.count ?? 0
+            let synced = fm.fileExists(atPath: folder(id).appending(path: "synced.json").path)
+            return "\(id):\(views):\(synced)"
+        }.joined(separator: ",")
     }
 
     static func tryOn(_ id: String) -> UIImage? {

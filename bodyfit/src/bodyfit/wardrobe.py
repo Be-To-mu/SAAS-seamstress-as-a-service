@@ -7,7 +7,9 @@ tryon.jpg). The phone can't reach MongoDB itself, so the Mac does it:
         database as the web studio, _id = the phone's id) and its pictures go to
         `garment_views`, one document per image. Then synced.json is pushed back.
 - down: garments in MongoDB the phone doesn't have (e.g. saved from the web)
-        are written to the phone, with their views or web thumbnail.
+        are written to the phone with their generated views. A web garment's
+        thumbnail is its *reference* photo, so it goes to reference.jpg; the
+        phone then draws the garment's own front view and it syncs back up.
 
 Settings come from web/.env.local (MONGODB_URI, MONGODB_DB), like the web studio.
 """
@@ -139,14 +141,12 @@ class Wardrobe:
             else:
                 (local / "views" / f"{v['angle']}.jpg").write_bytes(bytes(v["image"]))
                 n += 1
-        if n == 0:  # web garments carry a thumbnail data URL instead of views
-            thumb = (doc.get("thumbnails") or [None])[0] or doc.get("thumbnail")
-            if isinstance(thumb, str) and "," in thumb:
-                (local / "views" / "0.jpg").write_bytes(base64.b64decode(thumb.split(",", 1)[1]))
-                n = 1
+        thumb = (doc.get("thumbnails") or [None])[0] or doc.get("thumbnail")
+        if isinstance(thumb, str) and "," in thumb:  # web garments: the reference photo, not the garment
+            (local / "reference.jpg").write_bytes(base64.b64decode(thumb.split(",", 1)[1]))
         (local / "synced.json").write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(), "views": n}))
         self.device.push(local, f"{GARMENTS}/{gid}")
-        return f"wardrobe: downloaded {garment['name']} ({n} picture{'s' if n != 1 else ''})"
+        return f"wardrobe: downloaded {garment['name']} ({n} view{'s' if n != 1 else ''})"
 
 
 def _date(v):
