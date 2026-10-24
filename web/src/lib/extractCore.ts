@@ -26,6 +26,8 @@ export interface ExtractResult {
   /** False when the garment is something the blocks cannot really make (a dress, trousers). The spec is then only the closest shape. */
   fitsFamily: boolean;
   reason: string;
+  /** How the garment should look, in words, following the references closely (the picture is drawn from this; the pattern from `spec`). */
+  look: string;
   spec: Spec;
   confidence: Record<string, number>;
   sources: Record<string, string>;
@@ -42,9 +44,9 @@ In "sources", use "text" for fields you changed and "unchanged" for the rest. Gi
 
 const MODE_TEXT: Record<DesignMode, string> = {
   match: "The photos all show the SAME garment from different angles. Describe that one garment as faithfully as you can.",
-  mix: "The photos show DIFFERENT garments. Combine them into one new garment: for each field, take the detail you think works best from the photos (or the user's words), and say which one you took it from.",
+  mix: "The photos show DIFFERENT garments. Combine them into one new garment: for each field, take the detail you think works best from the photos (or the user's words), and say which one you took it from. The result must clearly show where each part came from, not fall back to a generic garment.",
   invent:
-    "Design a NEW garment. Use the photos only as inspiration for the overall feel, then make your own choices that fit the user's words. It does not need to copy any one photo.",
+    "Design a NEW garment that clearly grows out of the photos and the user's words: take its silhouette, fabric, colour and standout details from them. It does not need to copy any one photo, but it must not be generic.",
 };
 
 function modes(input: ExtractInput): { photoMode: DesignMode; designMode: DesignMode | "refine" } {
@@ -65,6 +67,7 @@ export function demoExtract(input: ExtractInput): ExtractResult {
     family: base.family,
     fitsFamily: true,
     reason: "Demo mode: no GEMINI_API_KEY is set, so these are the default values, not read from your photos or words.",
+    look: "",
     spec: base,
     confidence: Object.fromEntries(keys.map((k) => [k, 0.3])),
     sources: Object.fromEntries(keys.map((k) => [k, "default"])),
@@ -102,6 +105,7 @@ export function extractResult(raw: unknown, input: ExtractInput, model: string):
     family?: unknown;
     fitsFamily?: unknown;
     reason?: unknown;
+    look?: unknown;
     spec?: Record<string, unknown>;
     confidence?: Record<string, unknown>;
     sources?: Record<string, unknown>;
@@ -118,6 +122,7 @@ export function extractResult(raw: unknown, input: ExtractInput, model: string):
     family,
     fitsFamily: r.fitsFamily !== false,
     reason: clean(r.reason, 300),
+    look: clean(r.look, 900),
     spec,
     confidence,
     sources,

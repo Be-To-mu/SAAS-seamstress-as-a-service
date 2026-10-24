@@ -6,6 +6,7 @@ import SwiftUI
 /// read from where the person stands, and everything is spoken too.
 struct ScanView: View {
     @StateObject private var session = ScanSession()
+    @StateObject private var assistant = FittingAssistant()
     @State private var introStep = 0
     var canCancel = false
     let onClose: (URL?) -> Void
@@ -33,7 +34,7 @@ struct ScanView: View {
 
     private var showsFramingBorder: Bool {
         switch session.phase {
-        case .countdown, .positioning, .recording: true
+        case .countdown, .positioning, .stops: true
         default: false
         }
     }
@@ -51,11 +52,12 @@ struct ScanView: View {
                 Text(adviceText ?? "Getting ready…").titleStyle(20).multilineTextAlignment(.center)
                 Spacer()
             }
-        case .recording(let seconds, let progress):
+        case .stops(let taken, let holding):
             VStack {
-                BigNumber(value: seconds, caption: "Keep turning slowly to your left",
-                          hint: session.advice == .good ? nil : adviceText)
-                ProgressView(value: progress).tint(Theme.linen)
+                BigNumber(value: taken + 1, caption: holding ? "Hold still" : "Turn a little to your left",
+                          hint: session.advice == .good || session.advice == .armsUp || session.advice == .armsDown ? nil : adviceText,
+                          of: ScanSession.stopCount)
+                StopDots(taken: taken, total: ScanSession.stopCount)
                 Button("Stop") { session.stopEarly() }
                     .buttonStyle(TailoredButtonStyle(filled: false, onDark: true)).frame(width: 160).padding(.top)
             }
@@ -85,7 +87,7 @@ struct ScanView: View {
             }
             .padding(.bottom, 28)
             Text(introStep == 0 ? "Step 1 of 2 · Prepare" : "Step 2 of 2 · Pose").eyebrowStyle(onDark: true)
-            Text(introStep == 0 ? "Your fitting" : "Hold, then turn").titleStyle(34).padding(.top, 8)
+            Text(introStep == 0 ? "Your fitting" : "Eight stops").titleStyle(34).padding(.top, 8)
             Spacer()
             Group {
                 if introStep == 0 { prepare } else { pose }
@@ -93,6 +95,8 @@ struct ScanView: View {
             .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
         }
         .animation(.easeInOut(duration: 0.35), value: introStep)
+        .onAppear { session.speak(.introPrepare) }
+        .onChange(of: introStep) { _, step in session.speak(step == 0 ? .introPrepare : .introPose) }
     }
 
     private var prepare: some View {
@@ -103,9 +107,10 @@ struct ScanView: View {
                      text: "Stand it upright at waist height, against something steady, in an open space.")
             IntroRow(icon: "figure.stand", title: "Where to stand",
                      text: "About two metres from the phone, with your whole body, head to feet, in the picture.")
+            AskBar(assistant: assistant, voice: session.voicePrompter).padding(.top, 20)
             Button("Okay") { introStep = 1 }
                 .buttonStyle(TailoredButtonStyle(onDark: true))
-                .padding(.top, 24)
+                .padding(.top, 12)
         }
     }
 
@@ -121,10 +126,11 @@ struct ScanView: View {
             }
             .padding(.vertical, 16)
             .hairline(.bottom, onDark: true)
-            IntroRow(icon: "arrow.counterclockwise", title: "Turn",
-                     text: "Start facing the phone. When it says so, turn slowly to your left, all the way round, in about 20 seconds. Keep your arms still.")
+            IntroRow(icon: "arrow.counterclockwise", title: "Turn, and hold",
+                     text: "Start facing the phone. It asks you to turn a little to your left, eight times, and to hold still at each stop while it takes a picture. Keep your arms as they are.")
             Text("The phone speaks every step, so you don't need to see the screen.")
                 .font(.system(size: 13)).opacity(0.75).padding(.top, 14)
+            AskBar(assistant: assistant, voice: session.voicePrompter).padding(.top, 14)
             HStack(spacing: 12) {
                 Button("Back") { introStep = 0 }
                     .buttonStyle(TailoredButtonStyle(filled: false, onDark: true))
@@ -153,6 +159,8 @@ private struct BigNumber: View {
     let value: Int
     let caption: String
     var hint: String?
+    /// Shown as "3 of 8" in small type under the number.
+    var of: Int?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -163,6 +171,7 @@ private struct BigNumber: View {
                 .contentTransition(.numericText(countsDown: true))
                 .animation(.default, value: value)
                 .shadow(radius: 12)
+            if let of { Text("of \(of)").eyebrowStyle(onDark: true) }
             Text(caption).titleStyle(18).multilineTextAlignment(.center)
             if let hint {
                 Text(hint).font(Theme.body(20).weight(.semibold))
@@ -171,6 +180,24 @@ private struct BigNumber: View {
             }
             Spacer()
         }
+    }
+}
+
+/// The eight stops round the turn: taken ones filled.
+private struct StopDots: View {
+    let taken: Int
+    let total: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(0..<total, id: \.self) { i in
+                Circle()
+                    .fill(i < taken ? Theme.cream : .clear)
+                    .overlay(Circle().stroke(Theme.cream, lineWidth: 1))
+                    .frame(width: 9, height: 9)
+            }
+        }
+        .animation(.easeInOut, value: taken)
     }
 }
 

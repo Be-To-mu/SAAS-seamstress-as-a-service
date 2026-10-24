@@ -30,4 +30,24 @@ describe("mobile engine", () => {
     expect(view).toHaveLength(2);
     expect(E.tryOnRequest({ spec, person: img, garment: img })).toHaveLength(3);
   });
+
+  it("asks for a mannequin from a photo and dresses it, with guide lines when given", () => {
+    const img = "data:image/jpeg;base64,AAAA";
+    expect(E.mannequinRequest({ photo: img, angle: 0 })).toHaveLength(2);
+    const side = E.mannequinRequest({ photo: img, angle: 90, front: img });
+    expect(side).toHaveLength(3);
+    expect(side[0]).toMatchObject({ text: expect.stringContaining("arms hanging straight down") });
+    expect(side[0]).toMatchObject({ text: expect.stringContaining("Show EXACTLY this mannequin") });
+    expect(E.mannequinRequest({ photo: img, angle: 0, sex: "male" })[0]).toMatchObject({ text: expect.stringContaining("MUST have a male body") });
+    const spec = E.defaultSpecFor("coat");
+    const dressed = E.dressRequest({ spec, extras: [], mannequin: img, garment: img, garmentView: img, angle: 90, guides: { hem: true }, hemAt: "at the knee" });
+    expect(dressed).toHaveLength(4);
+    expect(dressed[0]).toMatchObject({ text: expect.stringContaining("falls at the knee, exactly on the RED line") });
+  });
+  it("draws the picture from the look in words, not a generic jacket", () => {
+    const spec = E.defaultSpecFor("coat");
+    const [first] = E.pictureRequest({ spec, images: [], extras: [], look: "A cropped boxy jacket in mustard corduroy with a shearling collar." });
+    expect(first).toMatchObject({ text: expect.stringContaining("mustard corduroy") });
+    expect((first as { text: string }).text).not.toContain("jacket from the front");
+  });
 });

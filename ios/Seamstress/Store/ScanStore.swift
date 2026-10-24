@@ -24,7 +24,11 @@ enum ScanStore {
 
     /// The phone keeps one body: drop every scan except `keep`.
     static func keepOnly(_ keep: URL) {
-        for scan in all() where scan.standardizedFileURL != keep.standardizedFileURL {
+        // Compare folder names, not paths: the same folder can show up as /var/… or /private/var/…,
+        // and a path mismatch here once deleted the scan that had just been taken.
+        let name = keep.lastPathComponent
+        guard FileManager.default.fileExists(atPath: root.appending(path: name).appending(path: "capture.json").path) else { return }
+        for scan in all() where scan.lastPathComponent != name {
             try? FileManager.default.removeItem(at: scan)
         }
     }
@@ -45,10 +49,13 @@ enum ScanStore {
         /// Where each girth's tape lies (closed loops), and each length's line; y-up metres like body.obj.
         let tapes: [String: [[[Double]]]]?
         let lines: [String: [[Double]]]?
+        /// Heights of the landmarks above the floor, in cm.
+        let levels: [String: Double]?
 
         enum CodingKeys: String, CodingKey {
             case definitions, order, tapes, lines
             case measurementsCm = "measurements_cm"
+            case levels = "levels_cm_above_floor"
         }
     }
 

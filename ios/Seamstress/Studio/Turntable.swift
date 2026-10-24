@@ -5,6 +5,7 @@ import SwiftUI
 struct Turntable: View {
     let views: [Int: UIImage]
     var autoTurn = true
+    var label = "Garment, drag sideways to turn it around"
 
     @State private var index = 0
     @State private var dragStart: Int?
@@ -17,7 +18,10 @@ struct Turntable: View {
             Theme.linen
             if views.isEmpty { MonogramPlaceholder() }
             if let image = image(at: index) {
-                Image(uiImage: image).resizable().scaledToFill()
+                // In an overlay, so the filled picture never sets the view's size (it widened whole pages).
+                Color.clear
+                    .overlay(Image(uiImage: image).resizable().scaledToFill())
+                    .clipped()
                     .transition(.opacity)
                     .id(index)
             }
@@ -46,7 +50,7 @@ struct Turntable: View {
                 }
             }
         }
-        .accessibilityLabel("Garment, drag sideways to turn it around")
+        .accessibilityLabel(label)
     }
 
     private var dots: some View {

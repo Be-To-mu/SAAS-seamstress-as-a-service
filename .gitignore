@@ -21,3 +21,5 @@ web/*.tsbuildinfo
 usb.log
 DerivedDataSim/
 scans-serve.log
+ios/build/
+ios/build-sim/

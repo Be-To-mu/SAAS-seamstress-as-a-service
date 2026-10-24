@@ -31,6 +31,10 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiredDeviceCapabilities: [arkit]
         NSPhotoLibraryUsageDescription: Seamstress uses photos you pick as references for a garment design.
+        NSMicrophoneUsageDescription: Seamstress listens when you hold Ask, so you can ask questions about your fitting.
+        NSSpeechRecognitionUsageDescription: Your question is turned into text on the phone so the assistant can answer it.
+        ElevenLabsAPIKey: $(ELEVENLABS_API_KEY)
+        ElevenLabsVoiceID: $(ELEVENLABS_VOICE_ID)
         GeminiAPIKey: $(GEMINI_API_KEY)
         GeminiModel: $(GEMINI_MODEL)
         NSCameraUsageDescription: Seamstress uses the camera and LiDAR to make a 3D model of your body.

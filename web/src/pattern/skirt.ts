@@ -1,7 +1,7 @@
 import { bandPanel, E, fr, placePatch } from "./blocks";
 import { cubic, polyLength, pt } from "./geometry";
 import { applyOps, opSchema, type Op, type OpInput } from "./ops";
-import type { Measurements, SkirtSpec } from "./spec";
+import type { Fit, Measurements, SkirtSpec } from "./spec";
 import type { Edge, Garment, Mark, Panel, Pt, Seam } from "./types";
 
 export interface SkirtDerived {
@@ -36,9 +36,9 @@ const arc = (r: number, a0: number, a1: number, n = 24): Pt[] =>
  * close the ring. Pencil and a-line skirts take in the waist with a side shift and darts, a circle skirt is cut on an arc,
  * and a gathered skirt is a rectangle pulled in to the band.
  */
-export function buildSkirt(spec: SkirtSpec, m: Measurements): { garment: Garment; derived: SkirtDerived } {
+export function buildSkirt(spec: SkirtSpec, m: Measurements, fit: Fit = {}): { garment: Garment; derived: SkirtDerived } {
   const elastic = spec.waist === "elastic";
-  const L = LENGTHS[spec.length];
+  const L = LENGTHS[spec.length] + (fit.length ?? 0);
   const h = m.waistToHip ?? 20;
   const waistQ = (m.waist + 1.5) / 4; // quarter of the finished waist on a fitted band
   const Wh = Math.max((m.hip + HIP_EASE[spec.ease]) / 4, waistQ + 1); // quarter hip, never narrower than the waist

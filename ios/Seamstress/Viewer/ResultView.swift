@@ -1,9 +1,9 @@
 import SceneKit
 import SwiftUI
 
-/// Shows the body in the standard A-pose, full screen in 3D, with a tape line
-/// for every measurement, once the Mac (`bodyfit usb`) has fitted the scan and
-/// copied the result back over the cable. Tap a measurement to highlight it.
+/// Your body as your mannequin (made from the scan's eight stops), with the
+/// measurements once the Mac (`bodyfit usb`) has fitted the scan and copied the
+/// result back over the cable. Scans from before the stops show the 3D body instead.
 struct ResultView: View {
     let scan: URL
     var onNext: (() -> Void)? = nil
@@ -12,44 +12,43 @@ struct ResultView: View {
     @State private var meshURL: URL?
     @State private var status: ScanStore.Status?
     @State private var message = ""
-    @State private var showMeasurements = false
-    @State private var selected: String?
 
     var body: some View {
         ZStack {
             Theme.cream.ignoresSafeArea()
-            if let meshURL, let measurements {
-                BodyMeshView(url: meshURL, measurements: measurements, selected: selected)
+            if !MannequinStore.angles(scan).isEmpty {
+                MannequinPanel(scan: scan).ignoresSafeArea(edges: .bottom)
+            } else if let meshURL, let measurements {
+                BodyMeshView(url: meshURL, measurements: measurements, selected: nil)
                     .ignoresSafeArea(edges: .bottom)
             } else {
                 waiting
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if measurements != nil {
-                HStack(spacing: 12) {
-                    Button { showMeasurements = true } label: {
-                        Label(selectedLabel ?? "Tapes", systemImage: "ruler").lineLimit(1)
-                    }
-                    .buttonStyle(TailoredButtonStyle(filled: false))
-                    if let onNext {
-                        Button("Next: measurements", action: onNext).buttonStyle(TailoredButtonStyle())
-                    }
+            VStack(spacing: 10) {
+                if measurements == nil, !message.isEmpty, !MannequinStore.angles(scan).isEmpty {
+                    Text(message.replacingOccurrences(of: "\n", with: " ")).font(.caption).foregroundStyle(Theme.sand)
+                        .multilineTextAlignment(.center)
                 }
-                .padding()
+                if let onNext {
+                    Button("Design a garment", action: onNext).buttonStyle(TailoredButtonStyle())
+                }
+                // Measurements are there for whoever wants them, not in the way.
+                if measurements != nil {
+                    NavigationLink(value: Route.measurements) {
+                        Text("Advanced · measurements").font(.system(size: 13)).underline()
+                    }
+                    .foregroundStyle(Theme.sand)
+                }
             }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Theme.cream)
         }
         .navigationTitle("Your body")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showMeasurements) {
-            MeasurementsSheet(measurements: measurements, selected: $selected)
-        }
         .task { await waitForResult() }
-    }
-
-    private var selectedLabel: String? {
-        guard let key = selected, let value = measurements?.measurementsCm[key] ?? nil else { return nil }
-        return "\(key.replacingOccurrences(of: "_", with: " ")) · \(String(format: "%.1f cm", value))"
     }
 
     private var waiting: some View {
@@ -90,44 +89,6 @@ struct ResultView: View {
             }
             try? await Task.sleep(for: .seconds(1))
         }
-    }
-}
-
-private struct MeasurementsSheet: View {
-    let measurements: ScanStore.Measurements?
-    @Binding var selected: String?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let m = measurements {
-                    ForEach(m.order, id: \.self) { key in
-                        Button {
-                            selected = selected == key ? nil : key
-                        } label: {
-                            LabeledContent {
-                                Text(m.measurementsCm[key].flatMap { $0 }.map { String(format: "%.1f cm", $0) } ?? "–")
-                                    .monospacedDigit()
-                            } label: {
-                                Text(m.definitions[key] ?? key)
-                            }
-                        }
-                        .foregroundStyle(Theme.ink)
-                        .listRowBackground(selected == key ? Theme.linen : Color.clear)
-                    }
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .listRowBackgroundCream()
-            .background(Theme.cream)
-            .navigationTitle("Measurements")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Done") { dismiss() } }
-        }
-        .presentationDetents([.fraction(0.4), .large])
-        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.4)))
     }
 }
 

@@ -2,25 +2,43 @@ import SwiftUI
 
 @main
 struct SeamstressApp: App {
+    init() {
+        let brown = UIColor(Theme.brown)
+        UINavigationBar.appearance().titleTextAttributes = [.foregroundColor: brown]
+        UINavigationBar.appearance().largeTitleTextAttributes = [.foregroundColor: brown]
+    }
+
     var body: some Scene {
         WindowGroup {
-            RootView().tint(Theme.brown)
+            // The palette is light only: in dark mode the system drew white titles on the cream bar.
+            RootView().tint(Theme.brown).preferredColorScheme(.light)
         }
     }
 }
 
-/// Landing: the camera on first launch (scan your body), afterwards the wardrobe.
-/// After a scan: body → measurements → design → creating → turn it around →
-/// try it on → (edit → pattern). A new body scan starts from the profile button.
+/// Landing: the camera on first launch (scan your body); afterwards three tabs: Create
+/// (straight to a new design), Wardrobe (everything you've designed) and Marketplace
+/// (designs others have offered). Each tab keeps its own navigation. A design goes
+/// creating → the design, on your mannequin or turned round → Craft it (seamstress, checkout).
+/// The profile (mannequin, measurements, orders, a new scan) is top right on every tab.
 struct RootView: View {
+    enum Tab: Hashable { case create, wardrobe, market }
+
     @StateObject private var profile = BodyProfile()
     @StateObject private var draft = DesignDraft()
     @StateObject private var wardrobe = WardrobeStore()
     @State private var hasBody = !ScanStore.all().isEmpty
     @State private var scanning = false
-    @State private var path = NavigationPath()
+    @State private var tab = Tab.wardrobe
+    @State private var paths: [Tab: NavigationPath] = [:]
     /// The design request waiting for the Creating page (nil = redraw the current design).
     @State private var pending: DesignInput?
+
+    /// The open tab's navigation.
+    private var path: NavigationPath {
+        get { paths[tab] ?? NavigationPath() }
+        nonmutating set { paths[tab] = newValue }
+    }
 
     var body: some View {
         Group {
@@ -30,14 +48,23 @@ struct RootView: View {
                     if let finished {
                         ScanStore.keepOnly(finished)  // one body at a time
                         hasBody = true
+                        tab = .wardrobe
                         path = NavigationPath([Route.body(finished)])
                     }
                 }
             } else {
-                NavigationStack(path: $path) {
-                    WardrobeView(onOpen: open, onNew: { path.append(Route.design) })
-                        .navigationDestination(for: Route.self, destination: destination)
+                TabView(selection: $tab) {
+                    stack(.create) { DesignView(onDesign: startDesign) }
+                        .tabItem { Label("Create design", systemImage: "scissors") }
+                        .tag(Tab.create)
+                    stack(.wardrobe) { WardrobeView(onOpen: open, onNew: { tab = .create }) }
+                        .tabItem { Label("Wardrobe", systemImage: "hanger") }
+                        .tag(Tab.wardrobe)
+                    stack(.market) { MarketplaceView(onMake: makeFromListing, onOpen: open) }
+                        .tabItem { Label("Marketplace", systemImage: "bag") }
+                        .tag(Tab.market)
                 }
+                .tint(Theme.brown)
             }
         }
         .environmentObject(profile)
@@ -47,19 +74,49 @@ struct RootView: View {
         .onAppear(perform: openDebugRoute)
     }
 
+    /// One tab's navigation, with the profile top right on its first page.
+    private func stack<Root: View>(_ t: Tab, @ViewBuilder root: () -> Root) -> some View {
+        NavigationStack(path: Binding { paths[t] ?? NavigationPath() } set: { paths[t] = $0 }) {
+            root()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink(value: Route.profile) { Image(systemName: "person").font(.system(size: 17, weight: .light)) }
+                            .accessibilityLabel("Profile")
+                    }
+                }
+                .navigationDestination(for: Route.self, destination: destination)
+        }
+    }
+
+    private func startDesign(_ input: DesignInput) {
+        pending = input
+        path.append(Route.creating)
+    }
+
+    /// Start your own design from a marketplace listing: its picture is the reference.
+    private func makeFromListing(_ l: Listing) {
+        draft.reset()
+        let picture = l.photo?.dataURL()
+        draft.references = picture.map { [$0] } ?? []
+        startDesign(DesignInput(images: draft.references, description: "\(l.title): \(l.detail)", mode: "match", current: nil))
+    }
+
+    /// Back to the wardrobe, where the design now is.
+    private func home() {
+        paths = [:]
+        tab = .wardrobe
+    }
+
     @ViewBuilder private func destination(_ route: Route) -> some View {
         switch route {
         case .profile:
             ProfileView { scanning = true }
         case .body(let scan):
-            ResultView(scan: scan) { path.append(Route.measurements) }
+            ResultView(scan: scan) { path.append(Route.design) }
         case .measurements:
             MeasurementsView { path.append(Route.design) }
         case .design:
-            DesignView { input in
-                pending = input
-                path.append(Route.creating)
-            }
+            DesignView(onDesign: startDesign)
         case .creating:
             CreatingView(input: pending, save: autosave) {
                 pending = nil
@@ -68,18 +125,28 @@ struct RootView: View {
                 path.append(Route.spin)
             }
         case .spin:
-            SpinView(save: autosave, onEdit: { path.append(Route.style) },
-                     onTryOn: { path.append(Route.tryOn) },
+            SpinView(save: autosave, onPattern: { path.append(Route.pattern) },
+                     onSave: home,  // kept: back to the wardrobe
+                     onCraft: { path.append(Route.seamstress) },
                      onRedraw: { pending = nil; path.append(Route.creating) })
-        case .tryOn:
-            TryOnView(onEdit: { path.append(Route.style) },
-                      onPattern: { path.append(Route.pattern) },
-                      onDone: { autosave(); path = NavigationPath() },
-                      save: autosave)
+        case .seamstress:
+            SeamstressView { path.append(Route.seamstressProfile($0.id)) }
+        case .seamstressProfile(let id):
+            if let s = Seamstress.find(id) {
+                SeamstressProfileView(seamstress: s) { path.append(Route.checkout(id)) }
+            }
+        case .checkout(let id):
+            if let s = Seamstress.find(id) {
+                CheckoutView(seamstress: s, save: autosave) { path.append(Route.ordered) }
+            }
+        case .ordered:
+            OrderPlacedView(onDone: home)
         case .style:
             StyleView { path.append(Route.pattern) }
+        case .order(let id):
+            OrderDetailView(garmentID: id)
         case .pattern:
-            PatternView { path = NavigationPath() }  // saved: back to the wardrobe
+            PatternView(onSaved: home)  // saved: back to the wardrobe
         }
     }
 
@@ -111,43 +178,88 @@ struct RootView: View {
         case "measurements": .measurements
         case "design": .design
         case "spin": .spin
-        case "tryon": .tryOn
+        case "seamstress": .seamstress
+        case "checkout": .checkout("amara")
+        case "maker": .seamstressProfile("amara")
         case "style": .style
         case "pattern": .pattern
         case "profile": .profile
+        case "market": nil
         default: nil
         }
+        // e.g. `-fit length=6,waist=-8` presets the fitting adjustments.
+        if let j = args.firstIndex(of: "-fit"), j + 1 < args.count {
+            for pair in args[j + 1].split(separator: ",") {
+                let kv = pair.split(separator: "=")
+                if kv.count == 2, let v = Double(kv[1]) { draft.fit[String(kv[0])] = v }
+            }
+        }
+        if args[i + 1] == "market" { tab = .market }
+        if args[i + 1] == "create" { tab = .create }
         if let route { path = NavigationPath([route]) }
         #endif
     }
 }
 
 enum Route: Hashable {
-    case profile, body(URL), measurements, design, creating, spin, tryOn, style, pattern
+    case profile, body(URL), measurements, design, creating, spin, seamstress, seamstressProfile(String), checkout(String), ordered, order(String), style, pattern
 }
 
-/// Your body, your measurements, and redoing the scan. The phone keeps one body at a time.
+/// Your body (the mannequin's sex, the measurements), your orders, and redoing the scan.
+/// The phone keeps one body at a time.
 struct ProfileView: View {
     let onRescan: () -> Void
+    @EnvironmentObject private var profile: BodyProfile
+    @ObservedObject private var maker = MannequinMaker.shared
     @State private var scan: URL?
+    @State private var orders: [(garment: SavedGarment, order: Order)] = []
 
     var body: some View {
         List {
             if let scan {
                 Section {
                     NavigationLink(value: Route.body(scan)) {
-                        Label("Your body", systemImage: "figure.stand")
+                        Label("Your mannequin", systemImage: "figure.stand")
                     }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Body").font(.caption).foregroundStyle(Theme.sand)
+                        Picker("Body", selection: $profile.sex) {
+                            Text("From my scan").tag(BodyProfile.Sex?.none)
+                            ForEach(BodyProfile.Sex.allCases, id: \.self) { Text($0.label).tag(BodyProfile.Sex?.some($0)) }
+                        }
+                        .pickerStyle(.segmented)
+                        if let sex = profile.sex, maker.madeAs != sex.rawValue, !maker.images.isEmpty {
+                            Button(maker.state == .making ? "Remaking your mannequin…" : "Remake my mannequin as \(sex.label.lowercased())") {
+                                Task { await maker.remake(sex: sex) }
+                            }
+                            .disabled(maker.state == .making)
+                            .font(.system(size: 14, weight: .semibold))
+                        }
+                    }
+                    .padding(.vertical, 4)
                     NavigationLink(value: Route.measurements) {
-                        Label("Your measurements", systemImage: "ruler")
+                        Label("Advanced · measurements", systemImage: "ruler")
                     }
+                } header: {
+                    Text("You")
+                } footer: {
+                    Text("Your mannequin is always made with this body.").font(.caption).foregroundStyle(Theme.sand)
+                }
+            }
+            Section("Your orders") {
+                if orders.isEmpty {
+                    Text("Nothing ordered yet. When a design is made for you, it shows here.")
+                        .font(Theme.body(14)).foregroundStyle(Theme.sand)
+                }
+                ForEach(orders, id: \.order.number) { item in
+                    NavigationLink(value: Route.order(item.garment.id)) { OrderRow(garment: item.garment, order: item.order) }
                 }
             }
             Section {
                 Button(action: onRescan) { Label("Redo body scan", systemImage: "camera") }
             } footer: {
                 Text("A new scan replaces your current body. Scan again if your measurements have changed "
-                    + "or the last scan didn't come out well.")
+                    + "or the last scan didn't come out well.").font(.caption).foregroundStyle(Theme.sand)
             }
         }
         .listStyle(.plain)
@@ -155,6 +267,84 @@ struct ProfileView: View {
         .listRowBackgroundCream()
         .background(Theme.cream.ignoresSafeArea())
         .navigationTitle("Profile")
-        .onAppear { scan = ScanStore.current }
+        .onAppear {
+            scan = ScanStore.current
+            if let scan { maker.load(scan) }
+            orders = GarmentStore.all().compactMap { g in GarmentStore.order(g.id).map { (g, $0) } }
+                .sorted { $0.order.placed > $1.order.placed }
+        }
+    }
+}
+
+/// One past purchase: the piece, who made it, the price, and where it is.
+private struct OrderRow: View {
+    let garment: SavedGarment
+    let order: Order
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Color.clear.frame(width: 54, height: 72)
+                .overlay { if let f = GarmentStore.front(garment.id) { Image(uiImage: f).resizable().scaledToFill() } else { MonogramPlaceholder() } }
+                .clipped()
+            VStack(alignment: .leading, spacing: 3) {
+                Text(garment.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text("By \(order.seamstressName) · \(CheckoutView.money(order.price))").font(Theme.body(13))
+                Text(order.status).font(.caption).foregroundStyle(Theme.sand)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+extension Order {
+    /// Where the order is, from its dates.
+    var status: String {
+        let ready = self.ready.formatted(date: .abbreviated, time: .omitted)
+        return Date() >= self.ready ? "Delivered \(ready)" : "Being made · ready by \(ready)"
+    }
+}
+
+/// One past order, in full.
+struct OrderDetailView: View {
+    let garmentID: String
+
+    var body: some View {
+        let g = GarmentStore.get(garmentID), o = GarmentStore.order(garmentID)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear.aspectRatio(0.8, contentMode: .fit)
+                    .overlay { if let f = GarmentStore.front(garmentID) { Image(uiImage: f).resizable().scaledToFill() } else { MonogramPlaceholder() } }
+                    .clipped()
+                if let g, let o {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Order \(o.number)").eyebrowStyle()
+                        Text(g.name).titleStyle(28)
+                        Text(o.status).font(Theme.body(15))
+                    }
+                    .padding(20)
+                    VStack(spacing: 12) {
+                        line("Made by", o.seamstressName)
+                        line("Ordered", o.placed.formatted(date: .long, time: .omitted))
+                        line("Ready by", o.ready.formatted(date: .long, time: .omitted))
+                        line("Delivered to", "\(o.deliverTo.name)\n\(o.deliverTo.line1)\(o.deliverTo.line2.isEmpty ? "" : ", " + o.deliverTo.line2)\n\(o.deliverTo.city) \(o.deliverTo.postcode)")
+                        line("Paid", "\(CheckoutView.money(o.price)) · card ending \(o.cardLast4)")
+                    }
+                    .padding(20)
+                    .hairline(.top)
+                }
+            }
+            .foregroundStyle(Theme.brown)
+        }
+        .background(Theme.cream.ignoresSafeArea())
+        .navigationTitle("Order")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func line(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).font(.caption).foregroundStyle(Theme.sand)
+            Spacer()
+            Text(value).font(Theme.body(15)).multilineTextAlignment(.trailing)
+        }
     }
 }

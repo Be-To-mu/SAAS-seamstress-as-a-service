@@ -11,6 +11,8 @@ const bodySchema = z.object({
   spec: specSchema,
   images: z.array(z.string()).max(MAX_REFERENCES).default([]),
   description: z.string().trim().max(600).optional(),
+  /** How it should look, in words, from the design answer. */
+  look: z.string().trim().max(900).optional(),
   /** The last picture, when this one is a tweak of it. */
   previous: z.string().optional(),
   /** What the user just asked to change. */

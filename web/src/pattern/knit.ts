@@ -1,8 +1,8 @@
-import { addArmholeNotches, bandPanel, buildSleeve, E, fr, placePatch, solveCap } from "./blocks";
+import { addArmholeNotches, bandPanel, buildSleeve, E, fr, placePatch, shapedSide, solveCap } from "./blocks";
 import { hoodOps } from "./features";
 import { cubic, polyLength, pt } from "./geometry";
 import { applyOps, opSchema, type Op, type OpInput } from "./ops";
-import type { KnitSpec, Measurements } from "./spec";
+import type { Fit, KnitSpec, Measurements } from "./spec";
 import type { Garment, Panel, Pt, Seam } from "./types";
 
 export interface KnitDerived {
@@ -27,7 +27,7 @@ const RIB = 0.9;
  * A pull-over knit top: tee, long-sleeve tee, sweatshirt or hoodie. The torso is cut as two halves on the fold,
  * so the front and back are each one piece. Neck and hem finishes are separate bands, as they are in real knitwear.
  */
-export function buildKnit(spec: KnitSpec, m: Measurements): { garment: Garment; derived: KnitDerived } {
+export function buildKnit(spec: KnitSpec, m: Measurements, fit: Fit = {}): { garment: Garment; derived: KnitDerived } {
   const girth = m.chest + KNIT_EASE[spec.ease];
   const Wb = girth / 4 + 0.5;
   const Wf = girth / 4 - 0.5;
@@ -38,7 +38,8 @@ export function buildKnit(spec: KnitSpec, m: Measurements): { garment: Garment; 
   const shoulderHalf = m.shoulder / 2 + { fitted: 0, regular: 1, boxy: 2.5 }[spec.ease] - (sleeveless ? 3 : 0);
   const S = pt(shoulderHalf, 2.5);
   const napeToHip = m.napeToHip ?? m.backLength + 20;
-  const L = napeToHip * spec.lengthFraction;
+  const L = napeToHip * spec.lengthFraction + (fit.length ?? 0);
+  const waistInset = -(fit.waist ?? 0) / 4;
   const band = spec.hem === "band";
   const Lb = band ? L - BAND_H : L; // the body ends where the band begins
   const fd = FRONT_NECK_DEPTH[spec.neck];
@@ -57,7 +58,7 @@ export function buildKnit(spec: KnitSpec, m: Measurements): { garment: Garment; 
       E("neck", backNeck),
       E("shoulder", [pt(N, -2), S]),
       E("armhole", backArm),
-      E("side", [pt(Wb, AD), pt(Wb, Lb)]),
+      E("side", shapedSide(pt(Wb, AD), pt(Wb, Lb), m.backLength, waistInset)),
       E("hem", [pt(Wb, Lb), pt(0, Lb)], hemAllowance),
       E("cb", [pt(0, Lb), pt(0, 0)], 0, "fold"),
     ],
@@ -73,7 +74,7 @@ export function buildKnit(spec: KnitSpec, m: Measurements): { garment: Garment; 
       E("neck", frontNeck),
       E("shoulder", [pt(N, -2), S]),
       E("armhole", frontArm),
-      E("side", [pt(Wf, AD), pt(Wf, Lb)]),
+      E("side", shapedSide(pt(Wf, AD), pt(Wf, Lb), m.backLength, waistInset)),
       E("hem", [pt(Wf, Lb), pt(0, Lb)], hemAllowance),
       E("cf", [pt(0, Lb), pt(0, fd)], 0, "fold"),
     ],

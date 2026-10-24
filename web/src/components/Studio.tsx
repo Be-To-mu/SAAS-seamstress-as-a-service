@@ -48,6 +48,8 @@ interface Design {
   /** False when the garment is something the blocks cannot really make, and the spec is only the closest shape. */
   fitsFamily: boolean;
   reason: string;
+  /** How it should look, in words; the picture is drawn from this. */
+  look: string;
   notes: string;
   unsupported: string[];
 }
@@ -95,6 +97,7 @@ const designFrom = (data: ExtractResult): Design => ({
   garment: data.garment,
   fitsFamily: data.fitsFamily,
   reason: data.reason,
+  look: data.look,
   notes: data.notes,
   unsupported: data.unsupported,
 });
@@ -180,7 +183,7 @@ export function Studio() {
   };
 
   /** Make a picture of `forSpec` and add it to the history. A tweak passes the picture it came from, so the look stays consistent. */
-  async function makePicture(forSpec: Spec, opts: { label: string; previous?: string; instruction?: string; extras?: string[] }) {
+  async function makePicture(forSpec: Spec, opts: { label: string; previous?: string; instruction?: string; extras?: string[]; look?: string }) {
     setPreviewBusy(true);
     setPreviewError("");
     try {
@@ -191,6 +194,8 @@ export function Studio() {
           spec: forSpec,
           images: photos.map((p) => p.full),
           description: description.trim() || undefined,
+          // Fresh designs pass their look directly: the `design` state isn't updated yet in this render.
+          look: (opts.look ?? design?.look) || undefined,
           previous: opts.previous,
           instruction: opts.instruction,
           // The picture must show the hood or zip that the pattern has.
@@ -243,7 +248,7 @@ export function Studio() {
       // Things the form cannot say (a hood) go into the pattern too, and into the picture.
       const wanted = extrasToAdd(data.unsupported);
       if (data.mode === "gemini") {
-        void makePicture(data.spec, { label: text, previous: active?.image, instruction: text, extras: [...featuresRef.current.map((f) => f.request), ...wanted] });
+        void makePicture(data.spec, { label: text, previous: active?.image, instruction: text, extras: [...featuresRef.current.map((f) => f.request), ...wanted], look: data.look });
       }
       await addExtras(data.unsupported, wanted, data.spec);
     } catch (e) {
@@ -275,7 +280,7 @@ export function Studio() {
       // Show the finished jacket as a picture. It runs alongside, so the form is usable while it loads.
       const wanted = extrasToAdd(data.unsupported);
       if (data.mode === "gemini") {
-        void makePicture(data.spec, { label: versions.length ? "New design" : "First design", extras: [...featuresRef.current.map((f) => f.request), ...wanted] });
+        void makePicture(data.spec, { label: versions.length ? "New design" : "First design", extras: [...featuresRef.current.map((f) => f.request), ...wanted], look: data.look });
       }
       await addExtras(data.unsupported, wanted, data.spec);
     } catch (e) {

@@ -12,7 +12,7 @@ struct PatternView: View {
     @State private var error: String?
 
     var body: some View {
-        let composed: Composed? = try? Engine.shared.call("compose", [draft.spec, profile.webMeasurements, draft.features])
+        let composed: Composed? = try? Engine.shared.call("compose", [draft.spec, profile.webMeasurements, draft.features, draft.fit])
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -52,6 +52,7 @@ struct PatternView: View {
         }
         .onChange(of: draft.spec) { pdfURL = nil }
         .onChange(of: draft.features) { pdfURL = nil }
+        .onChange(of: draft.fit) { pdfURL = nil }
     }
 
     private func stats(_ c: Composed) -> some View {
@@ -80,7 +81,7 @@ struct PatternView: View {
 
     private func makePDF() {
         do {
-            let b64: String = try Engine.shared.call("patternPdf", [draft.spec, profile.webMeasurements, draft.features, draft.name])
+            let b64: String = try Engine.shared.call("patternPdf", [draft.spec, profile.webMeasurements, draft.features, draft.name, draft.fit])
             guard let data = Data(base64Encoded: b64) else { throw Engine.Failure(message: "PDF failed") }
             let url = FileManager.default.temporaryDirectory.appending(path: "\(draft.name) pattern.pdf")
             try data.write(to: url)

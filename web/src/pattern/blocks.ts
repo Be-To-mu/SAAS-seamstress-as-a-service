@@ -144,3 +144,20 @@ export function placePatch(panel: Panel, w: number, h: number, fromY: number, pr
   }
   return null;
 }
+
+/**
+ * A side seam from the underarm to the hem, taken in (inset > 0) or let out (inset < 0)
+ * at the waist with a smooth taper. With no inset, or a waist outside the seam, it stays straight.
+ */
+export function shapedSide(top: Pt, bottom: Pt, waistY: number, inset: number): Pt[] {
+  if (Math.abs(inset) < 0.05 || waistY <= top.y + 4 || waistY >= bottom.y - 4) return [top, bottom];
+  const pts: Pt[] = [];
+  const n = 16;
+  for (let i = 0; i <= n; i++) {
+    const y = top.y + ((bottom.y - top.y) * i) / n;
+    const x = top.x + ((bottom.x - top.x) * (y - top.y)) / (bottom.y - top.y);
+    const t = y <= waistY ? (y - top.y) / (waistY - top.y) : (bottom.y - y) / (bottom.y - waistY);
+    pts.push(pt(x - inset * (0.5 - 0.5 * Math.cos(Math.PI * t)), y));
+  }
+  return pts;
+}

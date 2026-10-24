@@ -1,7 +1,7 @@
 import { buildCoat } from "./base";
 import { buildKnit } from "./knit";
 import { buildSkirt } from "./skirt";
-import { FAMILY_IDS, type CoatSpec, type FamilyId, type KnitSpec, type Measurements, type SkirtSpec, type Spec } from "./spec";
+import { FAMILY_IDS, type CoatSpec, type FamilyId, type Fit, type KnitSpec, type Measurements, type SkirtSpec, type Spec } from "./spec";
 import type { Garment } from "./types";
 
 export { FAMILY_IDS };
@@ -29,7 +29,8 @@ export interface FamilyDef {
   /** One line for the picker. */
   blurb: string;
   fields: FieldDef[];
-  build(spec: Spec, m: Measurements): Built;
+  /** `fit`: the wearer's adjustments (length, waist shaping); shoulder and sleeve arrive in `m`. */
+  build(spec: Spec, m: Measurements, fit?: Fit): Built;
   /** The design as a plain sentence, for the picture model. */
   describe(spec: Spec): string;
   /** The edges a hood is sewn to, or null when this garment cannot take one. */
@@ -61,8 +62,8 @@ const coat: FamilyDef = {
     { key: "ease", label: "Fit", kind: "select", options: ["fitted", "regular", "boxy"] },
     { key: "clothColor", label: "Cloth colour", kind: "color" },
   ],
-  build(spec, m) {
-    const { garment, derived } = buildCoat(spec as CoatSpec, m);
+  build(spec, m, fit) {
+    const { garment, derived } = buildCoat(spec as CoatSpec, m, fit);
     return {
       garment,
       stats: [
@@ -118,8 +119,8 @@ const knit: FamilyDef = {
     { key: "ease", label: "Fit", kind: "select", options: ["fitted", "regular", "boxy"] },
     { key: "clothColor", label: "Cloth colour", kind: "color" },
   ],
-  build(spec, m) {
-    const { garment, derived } = buildKnit(spec as KnitSpec, m);
+  build(spec, m, fit) {
+    const { garment, derived } = buildKnit(spec as KnitSpec, m, fit);
     const stats: Stat[] = [
       { label: "Finished chest", value: cm(derived.girth) },
       { label: "Length", value: cm(derived.length) },
@@ -164,8 +165,8 @@ const skirt: FamilyDef = {
     { key: "ease", label: "Fit / fullness", kind: "select", options: ["fitted", "regular", "boxy"] },
     { key: "clothColor", label: "Cloth colour", kind: "color" },
   ],
-  build(spec, m) {
-    const { garment, derived } = buildSkirt(spec as SkirtSpec, m);
+  build(spec, m, fit) {
+    const { garment, derived } = buildSkirt(spec as SkirtSpec, m, fit);
     const stats: Stat[] = [
       { label: "Finished waist", value: cm(derived.waist) },
       { label: "Finished hip", value: cm(derived.hip) },

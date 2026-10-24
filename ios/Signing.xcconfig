@@ -2,4 +2,6 @@
 CODE_SIGN_STYLE = Automatic
 GEMINI_API_KEY =
 GEMINI_MODEL = gemini-4-argon
+ELEVENLABS_API_KEY =
+ELEVENLABS_VOICE_ID = pFZP5JQG7iQjIQuC4Bku
 #include? "Local.xcconfig"

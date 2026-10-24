@@ -189,6 +189,8 @@ struct DesignResult: Codable {
     let family: String
     let fitsFamily: Bool
     let reason: String
+    /// How it should look, in words, following the references (the picture is drawn from this).
+    let look: String?
     let spec: Spec
     let unsupported: [String]
     let notes: String

@@ -1,7 +1,7 @@
-import { addArmholeNotches, buildSleeve, E, fr } from "./blocks";
+import { addArmholeNotches, buildSleeve, E, fr, shapedSide } from "./blocks";
 import { cubic, polyLength, pt } from "./geometry";
 import { applyOps, type OpInput, opSchema, type Op } from "./ops";
-import { EASE_CM, type CoatSpec, type Measurements } from "./spec";
+import { EASE_CM, type CoatSpec, type Fit, type Measurements } from "./spec";
 import type { Garment, Panel, Pt } from "./types";
 
 export { solveCap } from "./blocks";
@@ -24,7 +24,7 @@ const FACING = 4; // facing folded back behind the finished edge
 /** How much wider than the bicep the sleeve is cut. A trim coat needs less room, and so gets a taller cap. */
 const SLEEVE_EASE = { fitted: 10, regular: 13, boxy: 16 } as const;
 
-export function buildCoat(spec: CoatSpec, m: Measurements): { garment: Garment; derived: Derived } {
+export function buildCoat(spec: CoatSpec, m: Measurements, fit: Fit = {}): { garment: Garment; derived: Derived } {
   const girth = m.chest + EASE_CM[spec.ease];
   const Wb = girth / 4 + 1;
   const Wf = girth / 4 - 1;
@@ -34,7 +34,9 @@ export function buildCoat(spec: CoatSpec, m: Measurements): { garment: Garment; 
   const shoulderHalf = m.shoulder / 2 + { fitted: 0, regular: 0.8, boxy: 2 }[spec.ease];
   const S = pt(shoulderHalf, -2 + 4.5);
   const napeToHip = m.napeToHip ?? m.backLength + 20;
-  const L = napeToHip * spec.lengthFraction;
+  const L = napeToHip * spec.lengthFraction + (fit.length ?? 0);
+  // Waist shaping: a quarter of the girth change on each of the four side-seam edges.
+  const waistInset = -(fit.waist ?? 0) / 4;
   const hemGirth = Math.max(girth, m.hip + 16);
   const flare = (hemGirth - girth) / 4;
   const curve = spec.hem === "curved" ? 4 : 0;
@@ -62,7 +64,7 @@ export function buildCoat(spec: CoatSpec, m: Measurements): { garment: Garment; 
       E("neck", backNeck),
       E("shoulder", [pt(N, -2), S]),
       E("armhole", backArm),
-      E("side", [pt(Wb, AD), pt(Wb + flare, hemSideY)]),
+      E("side", shapedSide(pt(Wb, AD), pt(Wb + flare, hemSideY), m.backLength, waistInset)),
       E("hem", hemCurve(Wb + flare, 0), HEM_ALLOWANCE),
       E("cb", [pt(0, L), pt(0, 0)], 0, "fold"),
     ],
@@ -83,7 +85,7 @@ export function buildCoat(spec: CoatSpec, m: Measurements): { garment: Garment; 
       E("neck", frontNeck),
       E("shoulder", [pt(N, -2), S]),
       E("armhole", frontArm),
-      E("side", [pt(Wf, AD), pt(Wf + flare, hemSideY)]),
+      E("side", shapedSide(pt(Wf, AD), pt(Wf + flare, hemSideY), m.backLength, waistInset)),
       E("hem", hemCurve(Wf + flare, rawX), HEM_ALLOWANCE),
       E("cf", [pt(rawX, L), pt(rawX, ND)]),
       E("top", [pt(rawX, ND), pt(-WRAP, ND)]),

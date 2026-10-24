@@ -3,3 +3,5 @@
 DEVELOPMENT_TEAM = YOUR_TEAM_ID
 // Optional: Gemini for designing garments on the phone (https://aistudio.google.com/apikey). Without it, demo mode.
 // GEMINI_API_KEY = your-key
+// Optional: ElevenLabs, for spoken answers to questions during the fitting.
+// ELEVENLABS_API_KEY = your-key

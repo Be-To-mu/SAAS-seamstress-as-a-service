@@ -136,6 +136,23 @@ final class BundleWriter {
         try data.write(to: url)
     }
 
+    /// A stop's photo at full size, turned upright (the phone stands in portrait; the
+    /// sensor is landscape). Only for making the mannequin: deleted once it is made.
+    static func writeStill(_ pixels: CVPixelBuffer, angle: Int, in folder: URL) throws -> [String: Any] {
+        let dir = folder.appending(path: "stops")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let image = CIImage(cvPixelBuffer: pixels).oriented(.right)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let data = stillContext.jpegRepresentation(of: image, colorSpace: space,
+                                                         options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.9])
+        else { throw CocoaError(.fileWriteUnknown) }
+        try data.write(to: dir.appending(path: "\(angle).jpg"))
+        return ["angle": angle, "photo": "stops/\(angle).jpg",
+                "size": [Int(image.extent.width), Int(image.extent.height)]]
+    }
+
+    private static let stillContext = CIContext()
+
     // MARK: - Vision
 
     /// Raw 3D body pose. The image is passed in sensor orientation (.up); bodyfit

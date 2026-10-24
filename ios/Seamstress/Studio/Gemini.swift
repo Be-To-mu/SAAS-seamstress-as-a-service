@@ -24,6 +24,26 @@ enum Gemini {
         return try engine.call("designResult", [raw, input, model])
     }
 
+    /// Questions need an answer in about a second; Argon took ~24 s, flash-lite ~1 s with complete answers.
+    static let answerModel = "gemini-3.1-flash-lite-preview"
+
+    /// A short spoken-style answer to a question, with `context` as the system instruction.
+    static func answer(_ question: String, context: String) async throws -> String {
+        guard let key = apiKey else { throw Engine.Failure(message: "No Gemini key") }
+        let body: JSON = .object([
+            "contents": .array([.object(["role": .string("user"), "parts": .array([.object(["text": .string(question)])])])]),
+            "systemInstruction": .object(["parts": .array([.object(["text": .string(context)])])]),
+            "generationConfig": .object([
+                "temperature": .number(0.4), "maxOutputTokens": .number(600),
+                "thinkingConfig": .object(["thinkingLevel": .string("low")]),
+            ]),
+        ])
+        let text = try await generate(model: answerModel, body: body, key: key).compactMap { $0["text"]?.string }.joined()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw Engine.Failure(message: "No answer") }
+        return trimmed
+    }
+
     /// The image model the web studio uses for garment pictures.
     static let imageModel = "gemini-3.1-flash-image"
 
@@ -34,29 +54,45 @@ enum Gemini {
 
     /// The same garment from another angle (a turnaround view), given its front picture.
     static func view(_ input: ViewInput) async throws -> UIImage {
-        try await image(try Engine.shared.call("viewRequest", [input]))
+        try await image(try Engine.shared.call("viewRequest", [input]), size: "512")
     }
 
-    /// The person in `person` wearing the garment (Virtual Fitting Room style).
-    static func tryOn(_ input: TryOnInput) async throws -> UIImage {
-        try await image(try Engine.shared.call("tryOnRequest", [input]))
+    /// A plain dress-form with the person's exact shape and pose, from one stop photo.
+    static func mannequin(_ input: MannequinInput) async throws -> UIImage {
+        try await image(try Engine.shared.call("mannequinRequest", [input]))
+    }
+
+    /// The mannequin, from one angle, wearing the garment.
+    static func dress(_ input: DressInput) async throws -> UIImage {
+        try await image(try Engine.shared.call("dressRequest", [input]), size: "512")
     }
 
     /// One picture from the image model.
-    private static func image(_ parts: [JSON]) async throws -> UIImage {
+    /// `size` is the image model's output size: "512" renders in ~5 s instead of ~8 s for "1K", and is
+    /// sharp enough at phone size for the pictures made most often (dressing, turnaround views).
+    private static func image(_ parts: [JSON], size: String = "1K") async throws -> UIImage {
         guard let key = apiKey else { throw Engine.Failure(message: "Pictures need a Gemini key.") }
         let body: JSON = .object([
             "contents": .array([.object(["role": .string("user"), "parts": .array(parts)])]),
             "generationConfig": .object([
                 "responseModalities": .array([.string("IMAGE"), .string("TEXT")]),
-                "imageConfig": .object(["aspectRatio": .string("3:4")]),
+                "imageConfig": .object(["aspectRatio": .string("3:4"), "imageSize": .string(size)]),
             ]),
         ])
-        for part in try await generate(model: imageModel, body: body, key: key) {
-            if let data = part["inlineData"]?["data"]?.string, let bytes = Data(base64Encoded: data),
-               let image = UIImage(data: bytes) {
-                return image
+        // Now and then a reply comes back with no picture at all; asking again usually works.
+        for _ in 0..<2 {
+            // Read the picture straight out of the reply: the ~1.5 MB of base64 doesn't go through the JSON tree.
+            let data = try await send(model: imageModel, body: body, key: key)
+            let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let candidates = reply?["candidates"] as? [[String: Any]]
+            let parts = (candidates?.first?["content"] as? [String: Any])?["parts"] as? [[String: Any]] ?? []
+            for part in parts {
+                if let inline = part["inlineData"] as? [String: Any], let b64 = inline["data"] as? String,
+                   let bytes = Data(base64Encoded: b64), let image = UIImage(data: bytes) {
+                    return image
+                }
             }
+            print("Gemini image: no picture, finish \(candidates?.first?["finishReason"] ?? "-")")
         }
         throw Engine.Failure(message: "The image model sent back no picture.")
     }
@@ -78,8 +114,9 @@ enum Gemini {
         return value
     }
 
-    /// One generateContent call; returns the reply's parts.
-    private static func generate(model: String, body: JSON, key: String) async throws -> [JSON] {
+    /// POST one generateContent request. Google's side sometimes fails for a moment (500 INTERNAL,
+    /// 503, 429, timeouts): those are retried three times, waiting 1, 3 and 6 s (plus a little jitter).
+    private static func send(model: String, body: JSON, key: String) async throws -> Data {
         var url = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!
         url.queryItems = [URLQueryItem(name: "key", value: key)]
         var req = URLRequest(url: url.url!)
@@ -87,10 +124,38 @@ enum Gemini {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 120
         req.httpBody = try JSONEncoder().encode(body)
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw Engine.Failure(message: "Gemini: \(String(data: data, encoding: .utf8)?.prefix(200) ?? "error")")
+        var attempt = 0
+        while true {
+            let status: Int
+            let data: Data
+            do {
+                let (d, response) = try await URLSession.shared.data(for: req)
+                data = d
+                status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            } catch let error as URLError where error.code == .timedOut || error.code == .networkConnectionLost {
+                guard attempt < 3 else { throw Engine.Failure(message: "Google didn't answer in time. Please try again.") }
+                attempt += 1
+                try await Task.sleep(for: .seconds(retryDelay(attempt)))
+                continue
+            }
+            if status == 200 { return data }
+            print("Gemini \(model) \(status): \(String(data: data, encoding: .utf8)?.prefix(400) ?? "")")
+            if [429, 500, 502, 503, 504].contains(status), attempt < 3 {
+                attempt += 1
+                try await Task.sleep(for: .seconds(retryDelay(attempt)))
+                continue
+            }
+            throw Engine.Failure(message: status == 429 ? "Google is busy right now. Please try again in a minute."
+                : status >= 500 ? "Google's image service hiccuped. Please try again."
+                : "Gemini couldn't do that (error \(status)).")
         }
+    }
+
+    private static func retryDelay(_ attempt: Int) -> Double { [1.0, 3, 6][attempt - 1] + .random(in: 0...0.5) }
+
+    /// One generateContent call; returns the reply's parts.
+    private static func generate(model: String, body: JSON, key: String) async throws -> [JSON] {
+        let data = try await send(model: model, body: body, key: key)
         let reply = try JSONDecoder().decode(JSON.self, from: data)
         if case .array(let candidates)? = reply["candidates"],
            case .array(let parts)? = candidates.first?["content"]?["parts"] {
@@ -101,16 +166,36 @@ enum Gemini {
 }
 
 struct ViewInput: Codable {
+    struct Other: Codable { var angle: Int; var image: String }
     var spec: Spec
     var extras: [String]
     var front: String
     var angle: Int
+    var others: [Other]?
+    var look: String?
 }
 
-struct TryOnInput: Codable {
+struct MannequinInput: Codable {
+    var photo: String
+    var angle: Int
+    var front: String?
+    var sex: String?
+}
+
+struct DressInput: Codable {
+    struct Guides: Codable { var hem: Bool?; var sleeve: Bool? }
     var spec: Spec
-    var person: String
+    var extras: [String]
+    var mannequin: String
     var garment: String
+    var garmentView: String?
+    var angle: Int
+    var guides: Guides?
+    var hemAt: String?
+    var sleeveAt: String?
+    var notes: [String]?
+    var look: String?
+    var sameFit: String?
 }
 
 extension UIImage {
@@ -129,5 +214,6 @@ struct PictureInput: Codable {
     var spec: Spec
     var images: [String]
     var description: String?
+    var look: String?
     var extras: [String]
 }

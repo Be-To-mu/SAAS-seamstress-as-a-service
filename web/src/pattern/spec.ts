@@ -146,3 +146,27 @@ export const SAMPLE_BODY: Measurements = {
 };
 
 export const EASE_CM = { fitted: 12, regular: 18, boxy: 26 } as const;
+
+/**
+ * Adjustments the wearer makes on the 3D fitting, in cm on the finished garment:
+ * longer/shorter, wider/narrower at the waist (total girth) and across the shoulders,
+ * longer/shorter sleeves. Zero or missing means "as designed".
+ */
+export interface Fit {
+  length?: number;
+  waist?: number;
+  shoulder?: number;
+  sleeve?: number;
+}
+
+export const FIT_LIMITS: Record<keyof Fit, [number, number]> = {
+  length: [-20, 20],
+  waist: [-16, 16],
+  shoulder: [-4, 4],
+  sleeve: [-10, 10],
+};
+
+export function clampFit(f: Fit = {}): Required<Fit> {
+  const c = (k: keyof Fit) => Math.min(FIT_LIMITS[k][1], Math.max(FIT_LIMITS[k][0], Number(f[k]) || 0));
+  return { length: c("length"), waist: c("waist"), shoulder: c("shoulder"), sleeve: c("sleeve") };
+}

@@ -10,6 +10,8 @@ final class DesignDraft: ObservableObject {
     @Published var spec: Spec = [:] { didSet { if spec != oldValue, !views.isEmpty { viewsStale = true } } }
     @Published var features: [Feature] = [] { didSet { if features != oldValue, !views.isEmpty { viewsStale = true } } }
     @Published var notes = ""
+    /// How it should look, in words (from the design); the pictures follow it, the pattern follows `spec`.
+    @Published var look = ""
     @Published var savedID: String?
     /// What the design came from.
     @Published var references: [String] = []
@@ -19,6 +21,25 @@ final class DesignDraft: ObservableObject {
     @Published var tryOn: UIImage?
     /// The spec changed after the views were drawn.
     @Published var viewsStale = false
+    /// The design the views were drawn from. On me dresses the mannequin in this, so it always
+    /// shows the same garment as Images, even after an edit that hasn't been redrawn yet.
+    @Published var drawn: Drawn?
+
+    struct Drawn: Equatable {
+        var spec: Spec
+        var features: [Feature]
+        var look: String
+        /// When the front was drawn: a redraw of the same design is still a different picture.
+        var at = Date()
+    }
+
+    private var current: Drawn { Drawn(spec: spec, features: features, look: look) }
+    /// The wearer's adjustments from the fitting (cm): length, waist, shoulder, sleeve.
+    @Published var fit: [String: Double] = [:]
+    /// The order placed with a seamstress, if any.
+    @Published var order: Order?
+    /// Offered in the marketplace, for others to have made.
+    @Published var forSale = false
 
     var family: String { spec["family"]?.string ?? "coat" }
     var front: UIImage? { views[0] }
@@ -31,16 +52,23 @@ final class DesignDraft: ObservableObject {
         spec = [:]
         features = []
         notes = ""
+        look = ""
         savedID = nil
         tryOn = nil
         viewsStale = false
+        drawn = nil
+        fit = [:]
+        order = nil
+        forSale = false
     }
 
     func adopt(_ result: DesignResult) {
         views = [:]
+        drawn = nil
         if result.family != family { features = [] }
         tryOn = nil
         spec = result.spec
+        look = result.look ?? ""
         viewsStale = false
         name = result.garment.capitalized
         var lines: [String] = []
@@ -56,12 +84,18 @@ final class DesignDraft: ObservableObject {
         spec = g.spec
         features = g.features
         notes = ""
+        look = g.look ?? ""
         savedID = g.id
         views = GarmentStore.views(g.id)
         tryOn = GarmentStore.tryOn(g.id)
+        fit = g.fit ?? [:]
+        order = GarmentStore.order(g.id)
+        forSale = g.forSale ?? false
         references = GarmentStore.reference(g.id)?.dataURL().map { [$0] } ?? []
         words = ""
         viewsStale = false
+        // Kept views were drawn from the kept design, when the front was written.
+        drawn = views.isEmpty ? nil : Drawn(spec: spec, features: features, look: look, at: g.drawnAt ?? .distantPast)
     }
 
     /// Draw the turnaround: the front first (from the spec), then the other angles from the front,
@@ -75,23 +109,34 @@ final class DesignDraft: ObservableObject {
         if let existing = views[0] {
             front = existing
         } else {
-            front = try await Gemini.picture(PictureInput(spec: spec, images: references,
-                                                          description: words.isEmpty ? nil : words, extras: extras))
+            let design = current
+            front = try await Gemini.picture(PictureInput(spec: spec, images: references, description: words.isEmpty ? nil : words,
+                                                          look: look.isEmpty ? nil : look, extras: extras))
             views[0] = front
+            drawn = design
         }
         onFront?()
         progress(views.count)
         guard let frontURL = front.dataURL() else { return }
         let spec = self.spec
-        let rest = Self.angles.filter { views[$0] == nil }
+        let look = self.look.isEmpty ? nil : self.look
         var done = views.count
         var firstError: Error?
-        // Three at a time keeps it quick without tripping rate limits.
-        for batch in stride(from: 0, to: rest.count, by: 3).map({ Array(rest[$0..<min($0 + 3, rest.count)]) }) {
+        // In waves, so every view agrees with the ones drawn before it: the sides from the front, then
+        // the back from the front and a side, then the back three-quarters from all of those (the back
+        // is never seen from the front, so without this each angle invented its own).
+        let waves: [(angles: [Int], refs: [Int])] = [([45, 315, 90, 270], []), ([180], [90]), ([135, 225], [180, 90, 270])]
+        for wave in waves {
+            let todo = wave.angles.filter { Self.angles.contains($0) && views[$0] == nil }
+            if todo.isEmpty { continue }
             await withTaskGroup(of: (Int, Result<UIImage, Error>).self) { group in
-                for angle in batch {
+                for angle in todo {
+                    // The nearest of the references for this angle, small: enough to match details.
+                    let refs = wave.refs.filter { $0 != angle }.sorted { abs($0 - angle) < abs($1 - angle) }.prefix(2)
+                    let others = refs.compactMap { a in views[a]?.dataURL(side: 768).map { ViewInput.Other(angle: a, image: $0) } }
                     group.addTask {
-                        let input = ViewInput(spec: spec, extras: extras, front: frontURL, angle: angle)
+                        let input = ViewInput(spec: spec, extras: extras, front: frontURL, angle: angle,
+                                              others: others.isEmpty ? nil : others, look: look)
                         do { return (angle, .success(try await Gemini.view(input))) } catch { return (angle, .failure(error)) }
                     }
                 }
@@ -126,6 +171,12 @@ struct SavedGarment: Codable, Identifiable, Hashable {
     var measurements: [String: Double]
     var created: Date
     var source: String?
+    var fit: [String: Double]?
+    var look: String?
+    /// When its views were drawn (On me keys its pictures by it).
+    var drawnAt: Date?
+    /// Offered in the marketplace.
+    var forSale: Bool?
 
     var family: String { spec["family"]?.string ?? "coat" }
     var color: Color { Color(hex: spec["clothColor"]?.string ?? "#a9794a") }
@@ -159,7 +210,8 @@ enum GarmentStore {
         let fm = FileManager.default
         try fm.createDirectory(at: dir.appending(path: "views"), withIntermediateDirectories: true)
         let g = SavedGarment(id: id, name: draft.name, spec: draft.spec, features: draft.features,
-                             measurements: measurements, created: Date(), source: "iphone")
+                             measurements: measurements, created: Date(), source: "iphone",
+                             fit: draft.fit.isEmpty ? nil : draft.fit, look: draft.look.isEmpty ? nil : draft.look, drawnAt: draft.drawn?.at, forSale: draft.forSale ? true : nil)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -167,6 +219,7 @@ enum GarmentStore {
             try image.jpegData(compressionQuality: 0.85)?.write(to: dir.appending(path: "views/\(angle).jpg"))
         }
         if let tryOn = draft.tryOn { try tryOn.jpegData(compressionQuality: 0.85)?.write(to: dir.appending(path: "tryon.jpg")) }
+        if let order = draft.order { try encoder.encode(order).write(to: dir.appending(path: "order.json")) }
         try? fm.removeItem(at: dir.appending(path: "synced.json"))  // changed: the Mac uploads it again
         try encoder.encode(g).write(to: dir.appending(path: "garment.json"))
         return g
@@ -216,6 +269,11 @@ enum GarmentStore {
 
     static func tryOn(_ id: String) -> UIImage? {
         UIImage(contentsOfFile: folder(id).appending(path: "tryon.jpg").path)
+    }
+
+    static func order(_ id: String) -> Order? {
+        guard let data = try? Data(contentsOf: folder(id).appending(path: "order.json")) else { return nil }
+        return try? decoder.decode(Order.self, from: data)
     }
 
     static func isSynced(_ id: String) -> Bool {

@@ -4,19 +4,21 @@ import AVFoundation
 /// made by tools/voice/generate.py) and falls back to the system voice.
 @MainActor
 final class VoicePrompter {
-    /// Ids and wording match tools/voice/prompts.json.
+    /// Ids and wording match tools/voice/prompts.json (the ElevenLabs clips in Voice/ are made from it).
     enum Prompt: String {
+        case introPrepare = "intro_prepare"
+        case introPose = "intro_pose"
         case setup
-        case turn
-        case fifteen
-        case ten
-        case five
-        case four
-        case three
-        case two
-        case one
-        case done
         case good
+        case stop1 = "stop_1"
+        case stop2 = "stop_2"
+        case stop3 = "stop_3"
+        case stop4 = "stop_4"
+        case stop5 = "stop_5"
+        case stop6 = "stop_6"
+        case stop7 = "stop_7"
+        case hold
+        case done
         case stepBack = "step_back"
         case comeCloser = "come_closer"
         case wholeBody = "whole_body"
@@ -27,30 +29,32 @@ final class VoicePrompter {
 
         var text: String {
             switch self {
-            case .setup: "Put the phone upright at waist height. Walk about two metres away and face the phone, with nothing in your hands. Hold your arms straight and a little out to the sides, like an upside-down V."
-            case .turn: "Now turn slowly to your left, all the way round, keeping your arms still. You have twenty seconds."
-            case .fifteen: "Fifteen."
-            case .ten: "Ten seconds left."
-            case .five: "Five."
-            case .four: "Four."
-            case .three: "Three."
-            case .two: "Two."
-            case .one: "One."
-            case .done: "Done. You can come back to the phone."
-            case .good: "Good. Hold still."
-            case .stepBack: "Step back a little."
-            case .comeCloser: "Come a little closer."
-            case .wholeBody: "Make sure your whole body, from head to feet, is in view."
-            case .notSeen: "I can't see you. Stand in front of the phone."
+            case .introPrepare: "Hello, and welcome to your fitting. Before we start: wear something close-fitting, and tie long hair up if you can. Stand the phone upright at about waist height, somewhere with a little space around you. You'll stand about two metres away. Tap okay when you're ready."
+            case .introPose: "Lovely. When we begin, face the phone with your hands empty and your arms straight, a little away from your sides, like an upside-down V. Then I'll ask you to turn to your left, a little at a time, and hold still at each step while I take a picture. There are eight in all, and I'll guide you the whole way. If anything's unclear, just tap Ask and ask me."
+            case .setup: "Right, let's begin. Walk about two metres back and face the phone. Hands empty, arms straight and a little out to the sides."
+            case .good: "That's perfect. Hold still, just like that."
+            case .stop1: "Now turn a little to your left, about an eighth of the way round, and hold still."
+            case .stop2: "Lovely. A little more to your left, until your side faces the phone. And hold."
+            case .stop3: "And a little more. Hold it there."
+            case .stop4: "Keep going, until your back is to the phone. And hold still."
+            case .stop5: "Lovely. A little more to your left, and hold."
+            case .stop6: "Now your other side faces the phone. Hold still."
+            case .stop7: "Last one. A little more, and hold."
+            case .hold: "Hold still for me, just a moment."
+            case .done: "And that's it. You're all done. Thank you so much for your patience. You can come back to the phone now."
+            case .stepBack: "Could you take a small step back for me?"
+            case .comeCloser: "Come a little closer, please."
+            case .wholeBody: "I need to see all of you, from head to toe. Try taking a step back."
+            case .notSeen: "I can't quite see you yet. Please stand in front of the phone."
             case .armsUp: "Lift your arms a little away from your body, like an upside-down V."
             case .armsDown: "Lower your arms a little, to about halfway."
-            case .stayCentre: "Stay in the middle of the picture while you turn."
+            case .stayCentre: "Lovely. Try to stay in the middle of the picture as you turn."
             }
         }
 
-        /// Spoken at this many whole seconds remaining in the turn.
-        static func countdown(_ seconds: Int) -> Prompt? {
-            [15: .fifteen, 10: .ten, 5: .five, 4: .four, 3: .three, 2: .two, 1: .one][seconds]
+        /// What to say before stop `k` (1…7) of the turn.
+        static func stop(_ k: Int) -> Prompt? {
+            [1: .stop1, 2: .stop2, 3: .stop3, 4: .stop4, 5: .stop5, 6: .stop6, 7: .stop7][k]
         }
 
         static func advice(_ a: LiveCoach.Advice) -> Prompt? {
@@ -75,7 +79,13 @@ final class VoicePrompter {
         try? AVAudioSession.sharedInstance().setActive(true)
     }
 
-    func play(_ prompt: Prompt) {
+    /// True while a line is still being spoken.
+    var isSpeaking: Bool { (player?.isPlaying ?? false) || fallback.isSpeaking }
+
+    /// Speak a line. With `interrupt: false` it is skipped if another line is still playing
+    /// (countdown numbers shouldn't cut off an instruction).
+    func play(_ prompt: Prompt, interrupt: Bool = true) {
+        if !interrupt, isSpeaking { return }
         player?.stop()
         fallback.stopSpeaking(at: .immediate)
         if let url = Bundle.main.url(forResource: prompt.rawValue, withExtension: "mp3"),
@@ -85,6 +95,23 @@ final class VoicePrompter {
         } else {
             fallback.speak(AVSpeechUtterance(string: prompt.text))
         }
+    }
+
+    /// Play speech audio from elsewhere (an answer to a question), cutting off any line in progress.
+    func play(data: Data) {
+        player?.stop()
+        fallback.stopSpeaking(at: .immediate)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        if let clip = try? AVAudioPlayer(data: data) {
+            player = clip
+            clip.play()
+        }
+    }
+
+    func say(_ text: String) {
+        player?.stop()
+        fallback.stopSpeaking(at: .immediate)
+        fallback.speak(AVSpeechUtterance(string: text))
     }
 
     func stop() {

@@ -6,9 +6,16 @@ One turn scan = one folder. The iPhone app writes it in its Documents/scans. In 
 ```
 capture.json
 depth/0000.png …   16-bit grayscale PNG, depth in millimetres, 0 = no reading
-rgb/0000.jpg …     colour frame (half resolution), not used by the fit yet
+rgb/0000.jpg …     colour frame (half resolution), not used by the fit; stays on the phone
 mask/0000.png …    8-bit person mask (Apple's person segmentation, at depth size); optional
+stops.json         the eight guided stops: [{angle, photo, size}], angle = view round the person (0 front, 90 their left side)
+stops/<angle>.jpg  full-size upright photo at each stop, only until the mannequin is made
+mannequin/<angle>.jpg  Gemini's plain dress form with the person's shape, one per stop
 ```
+
+The person turns to their left in eight stops of 45°, holding still at each; depth keyframes are
+recorded the whole way round. Once every `mannequin/<angle>.jpg` exists the phone deletes `stops/`
+and `rgb/`: the app only ever shows the mannequin, never a photo of the person.
 
 ## capture.json
 

@@ -10,6 +10,7 @@ skipped. The mp3s are committed, so building the app needs no key.
 
 import hashlib
 import json
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -18,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = Path(__file__).with_name("prompts.json")
 OUT = REPO / "ios/Seamstress/Voice"
-DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"  # "Rachel", a stock ElevenLabs voice
+DEFAULT_VOICE = "pFZP5JQG7iQjIQuC4Bku"  # "Lily", warm British; a stock ElevenLabs voice
 MODEL = "eleven_multilingual_v2"
 
 
@@ -39,7 +40,13 @@ def speak(text: str, voice: str, key: str) -> bytes:
         data=json.dumps({"text": text, "model_id": MODEL}).encode(),
         headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
+    try:  # this Mac's python.org Python has no CA certificates of its own
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        context = None
+    with urllib.request.urlopen(req, timeout=60, context=context) as r:
         return r.read()
 
 
@@ -66,6 +73,10 @@ def main() -> None:
             sys.exit(f"ElevenLabs error for {pid}: {e.code} {e.read().decode()[:300]}")
         manifest[pid] = digest
         print(f"wrote      {pid}.mp3")
+    for stale in OUT.glob("*.mp3"):  # clips for prompts that no longer exist
+        if stale.stem not in prompts:
+            stale.unlink()
+            manifest.pop(stale.stem, None)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 

@@ -83,6 +83,8 @@ class Wardrobe:
         self.device.pull(f"{GARMENTS}/{gid}", local)
         g = json.loads((local / "garment.json").read_text())
         views = sorted((local / "views").glob("*.jpg"), key=lambda p: int(p.stem)) if (local / "views").exists() else []
+        request = json.loads((local / "request.json").read_text()) if (local / "request.json").exists() else None
+        order = json.loads((local / "order.json").read_text()) if (local / "order.json").exists() else None
         now = datetime.now(timezone.utc)
         self.db.garments.update_one(
             {"_id": gid},
@@ -94,6 +96,11 @@ class Wardrobe:
                     "spec": g.get("spec", {}),
                     "features": g.get("features", []),
                     "measurements": g.get("measurements", {}),
+                    "fit": g.get("fit") or {},  # the wearer's adjustments from the fitting, cm
+                    "look": g.get("look"),  # how it should look, in words; the pictures follow it
+                    "forSale": bool(g.get("forSale")),  # offered in the marketplace
+                    "seamstressRequest": request,  # older garments: where, by when, budget, cloth, notes
+                    "order": order,  # the seamstress chosen, price, delivery address, card's last 4 digits
                     "source": g.get("source", "iphone"),
                     "views": [int(p.stem) for p in views],
                     "updatedAt": now,
@@ -132,6 +139,9 @@ class Wardrobe:
             "measurements": {k: v for k, v in (doc.get("measurements") or {}).items() if isinstance(v, (int, float))},
             "created": (_date(doc.get("createdAt")) or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "source": doc.get("source") or "web",
+            "fit": {k: v for k, v in (doc.get("fit") or {}).items() if isinstance(v, (int, float))} or None,
+            "look": doc.get("look") if isinstance(doc.get("look"), str) else None,
+            "forSale": True if doc.get("forSale") is True else None,
         }
         (local / "garment.json").write_text(json.dumps(garment, indent=2, default=str))
         n = 0

@@ -1,8 +1,8 @@
 import PhotosUI
 import SwiftUI
 
-/// Designing starts here: the reference photos fill the page, with a full-width
-/// description field and Design it button underneath. Every design is a new
+/// Designing starts here: a full-width carousel of reference photos ("Add" first),
+/// then a "Describe it" section, and Design it at the bottom. Every design is a new
 /// design inspired by the photos and words; Design it goes to "Creating".
 struct DesignView: View {
     @EnvironmentObject private var draft: DesignDraft
@@ -13,27 +13,49 @@ struct DesignView: View {
     @FocusState private var typing: Bool
 
     private let maxPhotos = (try? Engine.shared.call("maxReferences", [], as: Int.self)) ?? 5
+    private let tileWidth: CGFloat = 220
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("New design").eyebrowStyle()
                     Text("What shall we make?").titleStyle(30)
-                    Text("Add photos of pieces you admire, then describe what you have in mind.").subtitleStyle(14)
                 }
-                references
+                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 22)
+
+                section("References", "Pieces you admire: a collar, a cut, a colour. Up to \(maxPhotos).")
+                carousel.padding(.bottom, 30)
+
+                section("Describe it", "What should it be, and how should it feel?")
+                TextField("A relaxed navy chore coat in heavy cotton, with a stand collar, hidden buttons and deep patch pockets. Hip length.",
+                          text: $draft.words, axis: .vertical)
+                    .lineLimit(4...8)
+                    .lineSpacing(3)
+                    .focused($typing)
+                    .font(Theme.body(16))
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .background(Theme.linen.opacity(0.6))
+                    .overlay(Rectangle().stroke(typing ? Theme.brown : Theme.hairline, lineWidth: typing ? 0.75 : 0.5))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
             }
             .foregroundStyle(Theme.brown)
-            .padding(20)
         }
         .scrollDismissesKeyboard(.immediately)
-        .contentShape(Rectangle())
-        .onTapGesture { typing = false }
         .background(Theme.cream.ignoresSafeArea())
-        .navigationTitle("Design")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) { describeBar }
+        .safeAreaInset(edge: .bottom) {
+            Button("Design it") { design() }
+                .buttonStyle(TailoredButtonStyle())
+                .disabled(isEmpty)
+                .opacity(isEmpty ? 0.45 : 1)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(Theme.cream)
+                .hairline(.top)
+        }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -43,58 +65,49 @@ struct DesignView: View {
         .onChange(of: picks) { _, items in Task { await load(items) } }
     }
 
-    /// Full-page grid of reference photos, with an add tile.
-    private var references: some View {
-        let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-        return LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(photos.indices, id: \.self) { i in
-                Image(uiImage: photos[i]).resizable().scaledToFill()
-                    .frame(minWidth: 0, maxWidth: .infinity)
-                    .aspectRatio(0.75, contentMode: .fit)
-                    .clipShape(Rectangle())
-                    .overlay(alignment: .topTrailing) {
-                        Button { remove(i) } label: {
-                            Image(systemName: "xmark.circle.fill").font(.title3)
-                                .symbolRenderingMode(.palette).foregroundStyle(Theme.cream, Theme.brown.opacity(0.8))
-                        }
-                        .padding(8)
-                    }
-            }
-            if photos.count < maxPhotos {
-                PhotosPicker(selection: $picks, maxSelectionCount: maxPhotos, matching: .images) {
-                    Rectangle()
-                        .stroke(Theme.brown, style: StrokeStyle(lineWidth: 1, dash: [5]))
-                        .aspectRatio(0.75, contentMode: .fit)
-                        .overlay(VStack(spacing: 10) {
-                            Image(systemName: "photo.badge.plus").font(.system(size: 30, weight: .light))
-                            Text(photos.isEmpty ? "Add reference photos" : "Add more").titleStyle(11)
-                            Text("up to \(maxPhotos)").font(.caption)
-                        })
-                }
-            }
+    private func section(_ title: String, _ hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).titleStyle(20)
+            Text(hint).subtitleStyle(14)
         }
+        .padding(.horizontal, 20).padding(.bottom, 12)
     }
 
-    /// The describe field, full width, with Design it underneath.
-    private var describeBar: some View {
-        VStack(spacing: 10) {
-            TextField("Describe it (optional)", text: $draft.words, axis: .vertical)
-                .lineLimit(1...4)
-                .focused($typing)
-                .submitLabel(.done)
-                .onSubmit { typing = false }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.linen.opacity(0.7))
-                .overlay(Rectangle().stroke(Theme.hairline, lineWidth: 0.5))
-            Button("Design it") { design() }
-                .buttonStyle(TailoredButtonStyle())
-                .disabled(isEmpty)
-                .opacity(isEmpty ? 0.45 : 1)
+    /// Always there, edge to edge: the add tile first, then the photos.
+    private var carousel: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                PhotosPicker(selection: $picks, maxSelectionCount: maxPhotos, matching: .images) {
+                    Rectangle()
+                        .stroke(Theme.brown, style: StrokeStyle(lineWidth: 0.75, dash: [5]))
+                        .background(Theme.linen.opacity(0.4))
+                        .frame(width: photos.isEmpty ? tileWidth : tileWidth * 0.55, height: tileWidth * 4 / 3)
+                        .overlay(VStack(spacing: 10) {
+                            Image(systemName: "plus").font(.system(size: 26, weight: .ultraLight))
+                            Text(photos.isEmpty ? "Add photos" : "Add more").font(.system(size: 14, weight: .medium))
+                            Text("\(photos.count) of \(maxPhotos)").font(.caption).foregroundStyle(Theme.sand)
+                        })
+                }
+                .disabled(photos.count >= maxPhotos)
+                ForEach(photos.indices, id: \.self) { i in
+                    Color.clear
+                        .frame(width: tileWidth, height: tileWidth * 4 / 3)
+                        .overlay(Image(uiImage: photos[i]).resizable().scaledToFill())
+                        .clipped()
+                        .overlay(alignment: .topTrailing) {
+                            Button { remove(i) } label: {
+                                Image(systemName: "xmark").font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Theme.cream)
+                                    .frame(width: 28, height: 28)
+                                    .background(Theme.ink.opacity(0.7))
+                            }
+                            .padding(8)
+                        }
+                }
+            }
+            .padding(.horizontal, 20)
+            .animation(.easeInOut(duration: 0.3), value: photos.count)
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(Theme.cream)
-        .hairline(.top)
     }
 
     private var isEmpty: Bool { photos.isEmpty && draft.words.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -116,8 +129,8 @@ struct DesignView: View {
         typing = false
         let text = draft.words.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.reset()
-        // Always a new design, using the photos and words as inspiration.
+        // A new design grown from the photos and words; with several photos, the best of each.
         onDesign(DesignInput(images: photos.compactMap { $0.dataURL() }, description: text.isEmpty ? nil : text,
-                             mode: "invent", current: nil))
+                             mode: photos.count > 1 ? "mix" : "invent", current: nil))
     }
 }

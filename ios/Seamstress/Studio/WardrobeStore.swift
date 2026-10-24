@@ -66,7 +66,7 @@ final class WardrobeStore: ObservableObject {
             defer { drawing.remove(g.id) }
             let reference = GarmentStore.reference(g.id)?.dataURL()
             guard let front = try? await Gemini.picture(PictureInput(spec: g.spec, images: reference.map { [$0] } ?? [],
-                                                                     description: nil, extras: g.features.map(\.request)))
+                                                                     description: nil, look: g.look, extras: g.features.map(\.request)))
             else { continue }
             GarmentStore.setFront(g.id, front)
             fronts[g.id] = front.preparingThumbnail(of: CGSize(width: 600, height: 800)) ?? front

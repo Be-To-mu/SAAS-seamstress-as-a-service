@@ -1,11 +1,32 @@
 import SwiftUI
 
-/// Step 2: adjust the design by hand (the family's own form fields), change it
-/// with words, and add ready-made features. The pattern updates as you go.
+/// The Style page: the style form on its own, with See the pattern below.
 struct StyleView: View {
+    let onPattern: () -> Void
+
+    var body: some View {
+        List { StyleForm() }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .listRowBackgroundCream()
+            .background(Theme.cream.ignoresSafeArea())
+            .navigationTitle("Style")
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                Button("See the pattern", action: onPattern)
+                    .buttonStyle(TailoredButtonStyle())
+                    .padding()
+                    .background(Theme.cream.opacity(0.95))
+            }
+    }
+}
+
+/// Adjust the design by hand (the family's own form fields), change it with words, and
+/// add ready-made features. The pattern updates as you go. List sections, so it can sit
+/// in the Style page or the Advanced settings sheet.
+struct StyleForm: View {
     @EnvironmentObject private var draft: DesignDraft
     @EnvironmentObject private var profile: BodyProfile
-    let onPattern: () -> Void
 
     @State private var change = ""
     @State private var busy = false
@@ -14,7 +35,7 @@ struct StyleView: View {
     private var family: Family? { Engine.families.first { $0.id == draft.family } }
 
     var body: some View {
-        List {
+        Group {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
@@ -72,26 +93,14 @@ struct StyleView: View {
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .listRowBackgroundCream()
-        .background(Theme.cream.ignoresSafeArea())
-        .navigationTitle("Style")
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            Button("See the pattern", action: onPattern)
-                .buttonStyle(TailoredButtonStyle())
-                .padding()
-                .background(Theme.cream.opacity(0.95))
-        }
     }
 
     private var composed: Composed? {
-        try? Engine.shared.call("compose", [draft.spec, profile.webMeasurements, draft.features])
+        try? Engine.shared.call("compose", [draft.spec, profile.webMeasurements, draft.features, draft.fit])
     }
 
     private var recipes: [Recipe] {
-        (try? Engine.shared.call("recipes", [draft.spec, profile.webMeasurements, draft.features], as: [Recipe].self)) ?? []
+        (try? Engine.shared.call("recipes", [draft.spec, profile.webMeasurements, draft.features, draft.fit], as: [Recipe].self)) ?? []
     }
 
     private func refine() async {

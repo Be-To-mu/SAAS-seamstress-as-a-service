@@ -4,6 +4,7 @@ import SwiftUI
 /// garment from the front and from every side. The front shows as soon as it's ready.
 struct CreatingView: View {
     @EnvironmentObject private var draft: DesignDraft
+    @EnvironmentObject private var profile: BodyProfile
     /// The design request from the Design page; nil when redrawing an existing design.
     let input: DesignInput?
     /// Keeps the design in the wardrobe as its pictures arrive.
@@ -25,25 +26,27 @@ struct CreatingView: View {
             }
             .padding(20)
 
-            Group {
-                if draft.front != nil {
-                    Turntable(views: draft.views, autoTurn: false)
-                } else {
-                    Rectangle().fill(Theme.linen).overlay { AtelierProgress() }
+            // The picture, with the steps on it.
+            Color.clear
+                .aspectRatio(0.8, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    if draft.front != nil {
+                        Turntable(views: draft.views, autoTurn: false)
+                    } else {
+                        Theme.linen.overlay(AtelierProgress().offset(y: -50))
+                    }
                 }
-            }
-            .aspectRatio(0.8, contentMode: .fit)
+                .overlay(alignment: .bottomLeading) { steps }
+                .clipped()
 
-            VStack(alignment: .leading, spacing: 12) {
-                stepRow("Reading your references", .reading)
-                stepRow("Drawing the front", .front)
-                stepRow("Drawing it from every side · \(min(drawn, 8)) of 8", .sides)
-                if let error {
+            if let error {
+                VStack(alignment: .leading, spacing: 10) {
                     Text(error).font(.callout).foregroundStyle(.red)
                     Button("Try again") { Task { await run() } }.buttonStyle(TailoredButtonStyle(filled: false))
                 }
+                .padding(20)
             }
-            .padding(20)
             Spacer(minLength: 0)
         }
         .foregroundStyle(Theme.brown)
@@ -58,6 +61,17 @@ struct CreatingView: View {
         .task { if !running && step != .done { await run() } }
     }
 
+    private var steps: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            stepRow("Reading your references", .reading)
+            stepRow("Drawing the front", .front)
+            stepRow("Drawing it from every side · \(min(drawn, 8)) of 8", .sides)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.cream.opacity(0.88))
+    }
+
     private func stepRow(_ title: String, _ s: Step) -> some View {
         HStack(spacing: 12) {
             Group {
@@ -68,8 +82,6 @@ struct CreatingView: View {
             .frame(width: 18)
             Text(title).font(Theme.body(15)).foregroundStyle(step.rawValue >= s.rawValue ? Theme.brown : Theme.sand)
         }
-        .hairline(.bottom)
-        .padding(.bottom, 8)
     }
 
     private func run() async {
@@ -84,7 +96,11 @@ struct CreatingView: View {
                 draft.references = input.images
             }
             step = .front
-            try await draft.drawViews(keepExisting: input == nil && !draft.viewsStale, onFront: save) { n in
+            try await draft.drawViews(keepExisting: input == nil && !draft.viewsStale, onFront: {
+                save()
+                // Dress the mannequin in it straight away, while the other sides are drawn.
+                Task { await Dresser.shared.prepare(draft, profile, angles: [0]) }
+            }) { n in
                 drawn = n
                 if n >= 1 { step = .sides }
             }

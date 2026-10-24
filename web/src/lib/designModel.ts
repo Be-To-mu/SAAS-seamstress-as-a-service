@@ -18,6 +18,7 @@ Answer with JSON only, in this exact shape:
   "family": "coat" | "knit" | "skirt",
   "fitsFamily": boolean,  // false if the garment is something these blocks cannot make (dress, trousers, shorts...). Be honest.
   "reason": string,       // one short sentence explaining the design you chose
+  "look": string,         // 2-4 sentences describing the garment exactly as it should LOOK, closely following the reference photos and the user's words: silhouette and proportions, length, fabric and its texture, colour and pattern, collar, closure, pockets, trims and any special details, including things the form cannot capture. This is what the picture is drawn from, so be specific and faithful to the references rather than generic.
   "spec": { ...the form for the family you chose, exactly as listed above, including "family"... },
   "confidence": { "<each spec key>": number 0-1 },   // how sure you are of each field
   "sources": { "<each spec key>": string },          // "photo 1", "photo 2", ..., "text", or "default"
