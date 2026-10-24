@@ -16,13 +16,12 @@ struct SeamstressApp: App {
     }
 }
 
-/// Landing: the camera on first launch (scan your body); afterwards three tabs: Create
-/// (straight to a new design), Wardrobe (everything you've designed) and Marketplace
-/// (designs others have offered). Each tab keeps its own navigation. A design goes
+/// Landing: the camera on first launch (scan your body); afterwards four tabs: Wardrobe
+/// (everything you've designed), Create design (straight to a new design), Marketplace
+/// (designs others have offered) and Profile. Each tab keeps its own navigation. A design goes
 /// creating → the design, on your mannequin or turned round → Craft it (seamstress, checkout).
-/// The profile (mannequin, measurements, orders, a new scan) is top right on every tab.
 struct RootView: View {
-    enum Tab: Hashable { case create, wardrobe, market }
+    enum Tab: Hashable { case wardrobe, create, market, profile }
 
     @StateObject private var profile = BodyProfile()
     @StateObject private var draft = DesignDraft()
@@ -54,15 +53,18 @@ struct RootView: View {
                 }
             } else {
                 TabView(selection: $tab) {
-                    stack(.create) { DesignView(onDesign: startDesign) }
-                        .tabItem { Label("Create design", systemImage: "scissors") }
-                        .tag(Tab.create)
                     stack(.wardrobe) { WardrobeView(onOpen: open, onNew: { tab = .create }) }
                         .tabItem { Label("Wardrobe", systemImage: "hanger") }
                         .tag(Tab.wardrobe)
+                    stack(.create) { DesignView(onDesign: startDesign) }
+                        .tabItem { Label("Create design", systemImage: "scissors") }
+                        .tag(Tab.create)
                     stack(.market) { MarketplaceView(onMake: makeFromListing, onOpen: open) }
                         .tabItem { Label("Marketplace", systemImage: "bag") }
                         .tag(Tab.market)
+                    stack(.profile) { ProfileView { scanning = true } }
+                        .tabItem { Label("Profile", systemImage: "person") }
+                        .tag(Tab.profile)
                 }
                 .tint(Theme.brown)
             }
@@ -74,17 +76,10 @@ struct RootView: View {
         .onAppear(perform: openDebugRoute)
     }
 
-    /// One tab's navigation, with the profile top right on its first page.
+    /// One tab's navigation.
     private func stack<Root: View>(_ t: Tab, @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: Binding { paths[t] ?? NavigationPath() } set: { paths[t] = $0 }) {
-            root()
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink(value: Route.profile) { Image(systemName: "person").font(.system(size: 17, weight: .light)) }
-                            .accessibilityLabel("Profile")
-                    }
-                }
-                .navigationDestination(for: Route.self, destination: destination)
+            root().navigationDestination(for: Route.self, destination: destination)
         }
     }
 
@@ -109,8 +104,6 @@ struct RootView: View {
 
     @ViewBuilder private func destination(_ route: Route) -> some View {
         switch route {
-        case .profile:
-            ProfileView { scanning = true }
         case .body(let scan):
             ResultView(scan: scan) { path.append(Route.design) }
         case .measurements:
@@ -183,8 +176,7 @@ struct RootView: View {
         case "maker": .seamstressProfile("amara")
         case "style": .style
         case "pattern": .pattern
-        case "profile": .profile
-        case "market": nil
+        case "profile", "market": nil
         default: nil
         }
         // e.g. `-fit length=6,waist=-8` presets the fitting adjustments.
@@ -196,13 +188,14 @@ struct RootView: View {
         }
         if args[i + 1] == "market" { tab = .market }
         if args[i + 1] == "create" { tab = .create }
+        if args[i + 1] == "profile" { tab = .profile }
         if let route { path = NavigationPath([route]) }
         #endif
     }
 }
 
 enum Route: Hashable {
-    case profile, body(URL), measurements, design, creating, spin, seamstress, seamstressProfile(String), checkout(String), ordered, order(String), style, pattern
+    case body(URL), measurements, design, creating, spin, seamstress, seamstressProfile(String), checkout(String), ordered, order(String), style, pattern
 }
 
 /// Your body (the mannequin's sex, the measurements), your orders, and redoing the scan.

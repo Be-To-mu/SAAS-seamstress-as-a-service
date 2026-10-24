@@ -1,8 +1,9 @@
 import PhotosUI
 import SwiftUI
 
-/// Designing starts here: a full-width carousel of reference photos ("Add" first),
-/// then a "Describe it" section, and Design it at the bottom. Every design is a new
+/// Designing starts here: a full-width carousel of reference photos ("Add" first, the
+/// whole width while there are none), then the description filling the rest of the
+/// screen, and Design it at the bottom. Every design is a new
 /// design inspired by the photos and words; Design it goes to "Creating".
 struct DesignView: View {
     @EnvironmentObject private var draft: DesignDraft
@@ -16,32 +17,42 @@ struct DesignView: View {
     private let tileWidth: CGFloat = 220
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("New design").eyebrowStyle()
+        GeometryReader { geo in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
                     Text("What shall we make?").titleStyle(30)
-                }
-                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 22)
+                        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 22)
 
-                section("References", "Pieces you admire: a collar, a cut, a colour. Up to \(maxPhotos).")
-                carousel.padding(.bottom, 30)
+                    section("References", "Pieces you admire: a collar, a cut, a colour. Up to \(maxPhotos).")
+                    carousel.padding(.bottom, 30)
 
-                section("Describe it", "What should it be, and how should it feel?")
-                TextField("A relaxed navy chore coat in heavy cotton, with a stand collar, hidden buttons and deep patch pockets. Hip length.",
-                          text: $draft.words, axis: .vertical)
-                    .lineLimit(4...8)
-                    .lineSpacing(3)
-                    .focused($typing)
+                    section("Describe it")
+                    // Fills the rest of the screen; scrolls instead once the keyboard takes the room.
+                    ZStack(alignment: .topLeading) {
+                        if draft.words.isEmpty {
+                            Text("A relaxed navy chore coat in heavy cotton, with a stand collar, hidden buttons and deep patch pockets. Hip length.")
+                                .foregroundStyle(Theme.sand)
+                                .padding(.horizontal, 5).padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                        }
+                        TextEditor(text: $draft.words)
+                            .focused($typing)
+                            .scrollContentBackground(.hidden)
+                    }
                     .font(Theme.body(16))
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .lineSpacing(3)
+                    .padding(11)
+                    .frame(maxWidth: .infinity, minHeight: 140, maxHeight: .infinity, alignment: .topLeading)
                     .background(Theme.linen.opacity(0.6))
                     .overlay(Rectangle().stroke(typing ? Theme.brown : Theme.hairline, lineWidth: typing ? 0.75 : 0.5))
+                    .contentShape(Rectangle())
+                    .onTapGesture { typing = true }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 20)
+                }
+                .frame(minHeight: geo.size.height, alignment: .top)
+                .foregroundStyle(Theme.brown)
             }
-            .foregroundStyle(Theme.brown)
         }
         .scrollDismissesKeyboard(.immediately)
         .background(Theme.cream.ignoresSafeArea())
@@ -65,10 +76,10 @@ struct DesignView: View {
         .onChange(of: picks) { _, items in Task { await load(items) } }
     }
 
-    private func section(_ title: String, _ hint: String) -> some View {
+    private func section(_ title: String, _ hint: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).titleStyle(20)
-            Text(hint).subtitleStyle(14)
+            if let hint { Text(hint).subtitleStyle(14) }
         }
         .padding(.horizontal, 20).padding(.bottom, 12)
     }
@@ -81,7 +92,9 @@ struct DesignView: View {
                     Rectangle()
                         .stroke(Theme.brown, style: StrokeStyle(lineWidth: 0.75, dash: [5]))
                         .background(Theme.linen.opacity(0.4))
-                        .frame(width: photos.isEmpty ? tileWidth : tileWidth * 0.55, height: tileWidth * 4 / 3)
+                        .frame(width: photos.isEmpty ? nil : tileWidth * 0.55, height: tileWidth * 4 / 3)
+                        // Nothing added yet: the add tile takes the whole width.
+                        .containerRelativeFrame(.horizontal) { w, _ in photos.isEmpty ? w - 40 : tileWidth * 0.55 }
                         .overlay(VStack(spacing: 10) {
                             Image(systemName: "plus").font(.system(size: 26, weight: .ultraLight))
                             Text(photos.isEmpty ? "Add photos" : "Add more").font(.system(size: 14, weight: .medium))
