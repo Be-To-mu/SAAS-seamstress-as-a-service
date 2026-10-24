@@ -12,3 +12,9 @@ DerivedData/
 ios/Local.xcconfig
 .env
 scans-serve.log
+
+# web (Next.js)
+web/node_modules/
+web/.next/
+web/.env.local
+web/*.tsbuildinfo
