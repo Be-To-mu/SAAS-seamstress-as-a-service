@@ -24,6 +24,7 @@ from pathlib import Path
 from .export import fit_scan
 
 APP = "io.github.be-to-mu.Seamstress"
+WARDROBE_EVERY = 6.0  # seconds between wardrobe syncs
 # What the phone shows for each fit phase, and how far along that is.
 STEPS = {
     "copy": ("Copying your scan to the Mac", 0.05),
@@ -135,6 +136,12 @@ def watch(udid: str | None = None, root: str = "scans", interval: float = 2.0, r
     device = Device(udid)
     root_path = Path(root)
     print(f"Watching the Seamstress app on {device.udid} for new scans (Ctrl-C to stop)")
+    from .wardrobe import Wardrobe
+
+    wardrobe = Wardrobe(device, root_path)
+    if wardrobe.db is None:
+        print("  wardrobe: no MONGODB_URI (web/.env.local), so garments are not synced")
+    last_wardrobe = 0.0
     failed: set[str] = set()
     again: set[str] | None = None
     while True:
@@ -148,6 +155,13 @@ def watch(udid: str | None = None, root: str = "scans", interval: float = 2.0, r
             print(f"  {e}; retrying")
             time.sleep(5)
             continue
+        if wardrobe.db is not None and time.time() - last_wardrobe > WARDROBE_EVERY:
+            last_wardrobe = time.time()
+            try:
+                for line in wardrobe.sync():
+                    print(line, flush=True)
+            except Exception as e:  # keep fitting scans even if MongoDB is unreachable
+                print(f"  wardrobe sync failed: {e}", flush=True)
         for scan in todo:
             if again:
                 again.discard(scan)

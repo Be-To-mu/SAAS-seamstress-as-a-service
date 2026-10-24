@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "matplotlib", "embreex"]  # embreex: fast ray casting for synthetic scans
 server = ["fastapi", "uvicorn[standard]", "python-multipart"]
+usb = ["pymongo", "certifi"]  # wardrobe sync with MongoDB
 
 [project.scripts]
 bodyfit = "bodyfit.cli:main"

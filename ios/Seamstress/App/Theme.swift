@@ -111,3 +111,7 @@ extension View {
             .background(Theme.cream)
     }
 }
+
+extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}

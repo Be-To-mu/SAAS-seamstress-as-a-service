@@ -8,7 +8,7 @@
 import { DESIGN_MODES, MAX_REFERENCES } from "@/lib/design";
 import { demoExtract, extractRequest, extractResult, type ExtractInput } from "@/lib/extractCore";
 import { buildPatternPdf } from "@/lib/pdf";
-import { previewParts, type PreviewInput } from "@/lib/previewCore";
+import { previewParts, tryOnParts, VIEW_ANGLES, viewParts, type PreviewInput, type TryOnInput, type ViewInput } from "@/lib/previewCore";
 import { compose as composeGarment } from "@/pattern/compose";
 import { FAMILIES, familyOf } from "@/pattern/families";
 import type { Feature } from "@/pattern/features";
@@ -66,6 +66,11 @@ export const designDemo = (input: ExtractInput) => demoExtract(input);
 export const designRequest = (input: ExtractInput) => extractRequest(input);
 /** The prompt and images for a picture of the garment (the image model). */
 export const pictureRequest = (input: PreviewInput) => previewParts(input);
+/** The angles of the 8-view turnaround, and the request for one of them. */
+export const viewAngles = () => VIEW_ANGLES;
+export const viewRequest = (input: ViewInput) => viewParts(input);
+/** The person wearing the garment (Virtual Fitting Room style). */
+export const tryOnRequest = (input: TryOnInput) => tryOnParts(input);
 
 export const designResult = (raw: unknown, input: ExtractInput, model: string) => extractResult(raw, input, model);
 

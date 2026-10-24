@@ -20,4 +20,14 @@ describe("mobile engine", () => {
     const r = E.designRequest({ images: [], description: "a navy hoodie" });
     expect(r.parts[0]).toMatchObject({ text: expect.stringContaining("a navy hoodie") });
   });
+
+  it("asks for turnaround views and a try-on with the images attached", () => {
+    const spec = E.defaultSpecFor("coat");
+    const img = "data:image/jpeg;base64,AAAA";
+    expect(E.viewAngles()).toEqual([0, 45, 90, 135, 180, 225, 270, 315]);
+    const view = E.viewRequest({ spec, extras: [], front: img, angle: 180 });
+    expect(view[0]).toMatchObject({ text: expect.stringContaining("straight from the back") });
+    expect(view).toHaveLength(2);
+    expect(E.tryOnRequest({ spec, person: img, garment: img })).toHaveLength(3);
+  });
 });

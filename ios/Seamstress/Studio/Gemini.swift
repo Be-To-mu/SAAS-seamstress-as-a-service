@@ -29,8 +29,22 @@ enum Gemini {
 
     /// A product-style picture of the designed garment (an illustration; the pattern comes from the spec).
     static func picture(_ input: PictureInput) async throws -> UIImage {
+        try await image(try Engine.shared.call("pictureRequest", [input]))
+    }
+
+    /// The same garment from another angle (a turnaround view), given its front picture.
+    static func view(_ input: ViewInput) async throws -> UIImage {
+        try await image(try Engine.shared.call("viewRequest", [input]))
+    }
+
+    /// The person in `person` wearing the garment (Virtual Fitting Room style).
+    static func tryOn(_ input: TryOnInput) async throws -> UIImage {
+        try await image(try Engine.shared.call("tryOnRequest", [input]))
+    }
+
+    /// One picture from the image model.
+    private static func image(_ parts: [JSON]) async throws -> UIImage {
         guard let key = apiKey else { throw Engine.Failure(message: "Pictures need a Gemini key.") }
-        let parts: [JSON] = try Engine.shared.call("pictureRequest", [input])
         let body: JSON = .object([
             "contents": .array([.object(["role": .string("user"), "parts": .array(parts)])]),
             "generationConfig": .object([
@@ -83,6 +97,31 @@ enum Gemini {
             return parts
         }
         return []
+    }
+}
+
+struct ViewInput: Codable {
+    var spec: Spec
+    var extras: [String]
+    var front: String
+    var angle: Int
+}
+
+struct TryOnInput: Codable {
+    var spec: Spec
+    var person: String
+    var garment: String
+}
+
+extension UIImage {
+    /// A JPEG data URL, at most `side` px, as the web studio sends images.
+    func dataURL(side: CGFloat = 1024, quality: CGFloat = 0.85) -> String? {
+        let scale = min(1, side / max(size.width, size.height))
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let small = UIGraphicsImageRenderer(size: target, format: format).image { _ in draw(in: CGRect(origin: .zero, size: target)) }
+        return small.jpegData(compressionQuality: quality).map { "data:image/jpeg;base64,\($0.base64EncodedString())" }
     }
 }
 

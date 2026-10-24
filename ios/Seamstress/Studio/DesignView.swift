@@ -1,20 +1,17 @@
 import PhotosUI
 import SwiftUI
 
-/// Designing starts here: the reference photos fill the page, and a small bar at
-/// the bottom takes the description. "Design it" asks Gemini, then shows the garment.
+/// Designing starts here: the reference photos fill the page, with a full-width
+/// description field and Design it button underneath. Every design is a new
+/// design inspired by the photos and words; Design it goes to "Creating".
 struct DesignView: View {
     @EnvironmentObject private var draft: DesignDraft
-    let onDesigned: () -> Void
+    let onDesign: (DesignInput) -> Void
 
     @State private var picks: [PhotosPickerItem] = []
     @State private var photos: [UIImage] = []
-    @State private var mode = "mix"
-    @State private var busy = false
-    @State private var error: String?
     @FocusState private var typing: Bool
 
-    private let modes: [DesignMode] = (try? Engine.shared.call("designModes", [], as: [DesignMode].self)) ?? []
     private let maxPhotos = (try? Engine.shared.call("maxReferences", [], as: Int.self)) ?? 5
 
     var body: some View {
@@ -25,14 +22,6 @@ struct DesignView: View {
                     Text("add photos of pieces you like").subtitleStyle()
                 }
                 references
-                if photos.count > 1 {
-                    Picker("Photos", selection: $mode) {
-                        ForEach(modes) { Text($0.label).tag($0.id) }
-                    }
-                    .pickerStyle(.segmented)
-                    Text(modes.first { $0.id == mode }?.hint ?? "").font(.caption).foregroundStyle(.secondary)
-                }
-                if let error { Text(error).font(.callout).foregroundStyle(.red) }
             }
             .foregroundStyle(Theme.brown)
             .padding(20)
@@ -85,31 +74,29 @@ struct DesignView: View {
         }
     }
 
-    /// The small input bar: description + Design it.
+    /// The describe field, full width, with Design it underneath.
     private var describeBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        VStack(spacing: 10) {
             TextField("Describe it (optional)", text: $draft.words, axis: .vertical)
                 .lineLimit(1...4)
                 .focused($typing)
                 .submitLabel(.done)
                 .onSubmit { typing = false }
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(Theme.linen.opacity(0.45), in: Rectangle())
-            Button { Task { await design() } } label: {
-                Group {
-                    if busy { ProgressView().tint(Theme.cream) } else { Text("Design it").font(Theme.display(12)).tracking(1.5).textCase(.uppercase) }
-                }
-                .frame(height: 22)
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .foregroundStyle(Theme.cream)
-                .background(Theme.brown, in: Rectangle())
-            }
-            .disabled(busy || (photos.isEmpty && draft.words.trimmingCharacters(in: .whitespaces).isEmpty))
-            .opacity(photos.isEmpty && draft.words.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.linen.opacity(0.7))
+                .overlay(Rectangle().stroke(Theme.hairline, lineWidth: 0.5))
+            Button("Design it") { design() }
+                .buttonStyle(TailoredButtonStyle())
+                .disabled(isEmpty)
+                .opacity(isEmpty ? 0.45 : 1)
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(.bar)
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(Theme.cream)
+        .hairline(.top)
     }
+
+    private var isEmpty: Bool { photos.isEmpty && draft.words.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private func remove(_ i: Int) {
         photos.remove(at: i)
@@ -122,35 +109,14 @@ struct DesignView: View {
             if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) { out.append(img) }
         }
         photos = out
-        if out.count <= 1 { mode = "match" } else if mode == "match" { mode = "mix" }
     }
 
-    private func design() async {
+    private func design() {
         typing = false
-        busy = true
-        error = nil
-        defer { busy = false }
-        let images = photos.compactMap(Self.dataURL)
         let text = draft.words.trimmingCharacters(in: .whitespacesAndNewlines)
-        let input = DesignInput(images: images, description: text.isEmpty ? nil : text,
-                                mode: images.isEmpty ? nil : (images.count == 1 ? "match" : mode), current: nil)
-        do {
-            draft.adopt(try await Gemini.design(input))
-            draft.features = []
-            draft.references = images
-            onDesigned()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    /// A JPEG data URL, at most 1024 px, as the web studio sends.
-    static func dataURL(_ image: UIImage) -> String? {
-        let side: CGFloat = 1024
-        let scale = min(1, side / max(image.size.width, image.size.height))
-        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let small = UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        guard let jpeg = small.jpegData(compressionQuality: 0.8) else { return nil }
-        return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+        draft.reset()
+        // Always a new design, using the photos and words as inspiration.
+        onDesign(DesignInput(images: photos.compactMap { $0.dataURL() }, description: text.isEmpty ? nil : text,
+                             mode: "invent", current: nil))
     }
 }
