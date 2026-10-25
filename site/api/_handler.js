@@ -12,7 +12,7 @@ function geminiEnv(root, mode) {
     return {
         key: process.env.GEMINI_API_KEY || local.GEMINI_API_KEY || app.GEMINI_API_KEY || '',
         textModel: pick('GEMINI_MODEL', 'gemini-4-argon'),
-        imageModel: pick('GEMINI_IMAGE_MODEL', 'gemini-4-argon'),
+        imageModel: pick('GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image'),
     };
 }
 function loadLocalEnv(root, mode) {
