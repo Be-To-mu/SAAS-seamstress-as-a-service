@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
-import { loadEnv, type Connect, type Plugin } from 'vite'
 
 const MAX_REFERENCES = 4
 const MAX_DESCRIPTION = 600
@@ -23,7 +22,7 @@ interface GeminiEnv {
 
 /** The key stays on the server. Workshop env wins, then the Blazeres app env. */
 function geminiEnv(root: string, mode: string): GeminiEnv {
-  const local = loadEnv(mode, root, '')
+  const local = loadLocalEnv(root, mode)
   const app = readEnvFile(BLAZERES_ENV)
   const pick = (name: string, fallback: string) => process.env[name] || local[name] || app[name] || fallback
   return {
@@ -31,6 +30,14 @@ function geminiEnv(root: string, mode: string): GeminiEnv {
     textModel: pick('GEMINI_MODEL', 'gemini-4-argon'),
     imageModel: pick('GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image'),
   }
+}
+
+function loadLocalEnv(root: string, mode: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const name of ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`]) {
+    Object.assign(out, readEnvFile(path.join(root, name)))
+  }
+  return out
 }
 
 function readEnvFile(file: string): Record<string, string> {
@@ -308,8 +315,8 @@ function send(res: ServerResponse, status: number, payload: unknown) {
   res.end(JSON.stringify(payload))
 }
 
-function handler(root: string, mode: string): Connect.NextHandleFunction {
-  return async (req, res, next) => {
+function handler(root: string, mode: string) {
+  return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url?.split('?')[0]
     if (url !== '/api/fuse' && url !== '/api/vary' && url !== '/api/wear') return next()
     if (req.method !== 'POST') {
@@ -348,14 +355,13 @@ export async function handleSeamstressRequest(req: IncomingMessage, res: ServerR
   })
 }
 
-export function seamstressFuse(): Plugin {
+export function seamstressFuse() {
+  const attach = (server: { config: { root: string; mode: string }; middlewares: { use: (fn: ReturnType<typeof handler>) => void } }) => {
+    server.middlewares.use(handler(server.config.root, server.config.mode))
+  }
   return {
     name: 'seamstress-fuse',
-    configureServer(server) {
-      server.middlewares.use(handler(server.config.root, server.config.mode))
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use(handler(server.config.root, server.config.mode))
-    },
+    configureServer: attach,
+    configurePreviewServer: attach,
   }
 }
