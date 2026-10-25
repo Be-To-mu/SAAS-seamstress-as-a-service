@@ -196,6 +196,12 @@ function readStop(raw, allowed) {
     const label = allowed.find((word) => text.toLowerCase().includes(word.toLowerCase()));
     return label ? { label, change: FIT_CHANGES[label] } : null;
 }
+function imageGeneration(model) {
+    const generationConfig = { responseModalities: ['IMAGE', 'TEXT'] };
+    if (!model.includes('argon'))
+        generationConfig.imageConfig = { aspectRatio: '3:4' };
+    return generationConfig;
+}
 async function productPhoto(env, sentence, input, sameGarment = false) {
     const prompt = [
         `Create one photorealistic product photo of ${sentence}.`,
@@ -210,7 +216,7 @@ async function productPhoto(env, sentence, input, sameGarment = false) {
     ].filter(Boolean).join('\n');
     const pictured = await generate(env.imageModel, env.key, {
         contents: [{ role: 'user', parts: [{ text: prompt }, ...input.images.map((image) => ({ inlineData: image }))] }],
-        generationConfig: { responseModalities: ['IMAGE', 'TEXT'], imageConfig: { aspectRatio: '3:4' } },
+        generationConfig: imageGeneration(env.imageModel),
     });
     const image = imageOf(pictured);
     if (!image)
@@ -233,7 +239,7 @@ async function studioModel(root, env) {
     }
     const pictured = await generate(env.imageModel, env.key, {
         contents: [{ role: 'user', parts: [{ text: MODEL_PROMPT }] }],
-        generationConfig: { responseModalities: ['IMAGE', 'TEXT'], imageConfig: { aspectRatio: '3:4' } },
+        generationConfig: imageGeneration(env.imageModel),
     });
     const image = imageOf(pictured);
     if (!image)
@@ -257,7 +263,7 @@ async function wear(root, garment, summary, env) {
     ].join('\n');
     const pictured = await generate(env.imageModel, env.key, {
         contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: model }, { inlineData: garment }] }],
-        generationConfig: { responseModalities: ['IMAGE', 'TEXT'], imageConfig: { aspectRatio: '3:4' } },
+        generationConfig: imageGeneration(env.imageModel),
     });
     const image = imageOf(pictured);
     if (!image)

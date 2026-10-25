@@ -222,6 +222,12 @@ function readStop(raw: unknown, allowed: readonly (typeof FIT_LABELS)[number][])
   return label ? { label, change: FIT_CHANGES[label] } : null
 }
 
+function imageGeneration(model: string) {
+  const generationConfig: { responseModalities: string[]; imageConfig?: { aspectRatio: string } } = { responseModalities: ['IMAGE', 'TEXT'] }
+  if (!model.includes('argon')) generationConfig.imageConfig = { aspectRatio: '3:4' }
+  return generationConfig
+}
+
 async function productPhoto(env: GeminiEnv, sentence: string, input: FuseInput, sameGarment = false): Promise<string> {
   const prompt = [
     `Create one photorealistic product photo of ${sentence}.`,
@@ -236,7 +242,7 @@ async function productPhoto(env: GeminiEnv, sentence: string, input: FuseInput, 
   ].filter(Boolean).join('\n')
   const pictured = await generate(env.imageModel, env.key, {
     contents: [{ role: 'user', parts: [{ text: prompt }, ...input.images.map((image) => ({ inlineData: image }))] }],
-    generationConfig: { responseModalities: ['IMAGE', 'TEXT'], imageConfig: { aspectRatio: '3:4' } },
+    generationConfig: imageGeneration(env.imageModel),
   })
   const image = imageOf(pictured)
   if (!image) throw new Error(`The image model sent back no picture. ${textOf(pictured).slice(0, 160)}`.trim())
@@ -260,7 +266,7 @@ async function studioModel(root: string, env: GeminiEnv): Promise<{ mimeType: st
   }
   const pictured = await generate(env.imageModel, env.key, {
     contents: [{ role: 'user', parts: [{ text: MODEL_PROMPT }] }],
-    generationConfig: { responseModalities: ['IMAGE', 'TEXT'], imageConfig: { aspectRatio: '3:4' } },
+    generationConfig: imageGeneration(env.imageModel),
   })
   const image = imageOf(pictured)
   if (!image) throw new Error('Could not prepare the model photo.')
@@ -283,7 +289,7 @@ async function wear(root: string, garment: { mimeType: string; data: string }, s
   ].join('\n')
   const pictured = await generate(env.imageModel, env.key, {
     contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: model }, { inlineData: garment }] }],
-    generationConfig: { responseModalities: ['IMAGE', 'TEXT'], imageConfig: { aspectRatio: '3:4' } },
+    generationConfig: imageGeneration(env.imageModel),
   })
   const image = imageOf(pictured)
   if (!image) throw new Error(`Could not dress her. ${textOf(pictured).slice(0, 160)}`.trim())
