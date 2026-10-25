@@ -110,7 +110,7 @@ function stripFences(text) {
     return match ? match[1] : text.trim();
 }
 /** Photos and words → one garment sentence, then one product picture. Same job as the studio's design step. */
-async function fuse(input, env) {
+async function fuse(input, env, root) {
     const intro = [
         input.images.length
             ? `There are ${input.images.length} reference photo${input.images.length === 1 ? '' : 's'}.`
@@ -155,7 +155,20 @@ Do not mention people, backgrounds, or the camera.`,
             summary = fallback.slice(0, 400);
     }
     const image = await productPhoto(env, summary, input);
-    return { garment, summary, image, ...fit, model: env.imageModel };
+    const worn = await dress(root, image, summary, env);
+    return { garment, summary, image, worn, ...fit, model: env.imageModel };
+}
+async function dress(root, image, summary, env) {
+    const match = image.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i);
+    if (!match)
+        return undefined;
+    try {
+        const worn = await wear(root, { mimeType: match[1].toLowerCase(), data: match[2] }, summary, env);
+        return worn.image;
+    }
+    catch {
+        return undefined;
+    }
 }
 /** The two ends of the slider. The base picture is already on the page. */
 async function vary(input, summary, less, more, env) {
@@ -321,7 +334,7 @@ function handler(root, mode) {
                 send(res, 200, await vary(input, input.summary, input.less, input.more, env));
                 return;
             }
-            send(res, 200, await fuse(parseInput(raw), env));
+            send(res, 200, await fuse(parseInput(raw), env, root));
         }
         catch (error) {
             const message = error instanceof Error ? error.message : 'Could not fuse that idea.';

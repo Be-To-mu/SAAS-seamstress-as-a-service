@@ -21,6 +21,7 @@ interface FuseResult {
   axis: string
   less: FitStop
   more: FitStop
+  worn?: string
 }
 
 const shared = [
@@ -403,9 +404,10 @@ export default function App() {
 
   useEffect(() => {
     dressToken.current += 1
-    wornRef.current = {}
+    const seeded: Record<string, string> = creation?.worn ? { base: creation.worn } : {}
+    wornRef.current = seeded
     pendingRef.current = new Set()
-    setWorn({})
+    setWorn(seeded)
     setPick(1)
   }, [creation?.image])
 
