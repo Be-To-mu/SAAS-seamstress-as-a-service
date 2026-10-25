@@ -164,9 +164,9 @@ function LiveImagine({ creation, onResult, onBusy }: { creation: FuseResult | nu
   }
 
   async function addPhotos(event: ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!files?.length) return
+    if (!files.length) return
     const room = MAX_REFERENCES - photos.length
     if (room <= 0) {
       setError(`You can use up to ${MAX_REFERENCES} reference photos.`)
@@ -175,9 +175,7 @@ function LiveImagine({ creation, onResult, onBusy }: { creation: FuseResult | nu
     setError('')
     try {
       const next: Photo[] = []
-      for (let index = 0; index < Math.min(files.length, room); index += 1) {
-        const file = files.item(index)
-        if (!file) continue
+      for (const file of files.slice(0, room)) {
         next.push({ id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, src: await shrink(file) })
       }
       setPhotos((current) => [...current, ...next])
