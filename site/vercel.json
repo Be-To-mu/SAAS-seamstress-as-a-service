@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/fuse.ts": { "maxDuration": 60, "includeFiles": "public/mascot.jpg" },
+    "api/vary.ts": { "maxDuration": 60 },
+    "api/wear.ts": { "maxDuration": 60, "includeFiles": "public/mascot.jpg" }
+  }
+}

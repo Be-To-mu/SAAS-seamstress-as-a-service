@@ -1,0 +1,10 @@
+{
+  "description": "A London made-to-measure service helps clients turn a photograph or idea into custom clothing, crafted around their body by a chosen seamstress.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
