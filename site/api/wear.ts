@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { handleSeamstressRequest } from '../src/server/fuse'
+import { handleSeamstressRequest } from './_handler.js'
 
 export const maxDuration = 60
 

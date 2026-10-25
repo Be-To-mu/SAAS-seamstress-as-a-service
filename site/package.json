@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc src/server/fuse.ts --outDir api/_gen --module es2022 --target es2022 --moduleResolution bundler --skipLibCheck && mv api/_gen/fuse.js api/_handler.js && rm -rf api/_gen && vite build",
     "preview": "vite preview",
     "format": "oxfmt"
   },
