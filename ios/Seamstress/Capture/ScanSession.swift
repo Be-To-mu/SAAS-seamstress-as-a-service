@@ -15,7 +15,7 @@ final class ScanSession: ObservableObject {
 
     static let countdownSeconds = 10
     static let stopCount = 8
-    static let repeatAdvice = 4.0  // seconds between repeated spoken corrections
+    static let repeatAdvice = 3.0  // seconds of quiet before a correction is repeated
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var frames = 0
@@ -83,10 +83,7 @@ final class ScanSession: ObservableObject {
     func stopEarly() { finishRecording() }
 
     /// Read out one of the setup screens.
-    func speak(_ prompt: VoicePrompter.Prompt) { voice.play(prompt) }
-
-    /// The voice, for answering questions in the same voice and session.
-    var voicePrompter: VoicePrompter { voice }
+    func speak(_ prompt: VoicePrompter.Prompt) { voice.play(prompt, interrupt: true) }
 
     /// Wait until the whole body is in view, at a good distance, arms out.
     private func startPositioning() {
@@ -113,6 +110,7 @@ final class ScanSession: ObservableObject {
     }
 
     private func speakAdvice() {
+        if voice.isBusy { lastSpoken = Date(); return }  // the gap counts from the end of the last line
         guard Date().timeIntervalSince(lastSpoken) >= Self.repeatAdvice,
               let prompt = VoicePrompter.Prompt.advice(advice), advice != .good else { return }
         lastSpoken = Date()
@@ -131,8 +129,8 @@ final class ScanSession: ObservableObject {
                 if k > 0 {
                     self.phase = .stops(taken: k, holding: false)
                     if let prompt = VoicePrompter.Prompt.stop(k) { self.voice.play(prompt) }
-                    await self.waitWhileSpeaking()
                 }
+                await self.waitWhileSpeaking()  // every instruction is heard in full first
                 self.phase = .stops(taken: k, holding: true)
                 await self.waitForStillness()
                 if Task.isCancelled { return }
@@ -146,7 +144,7 @@ final class ScanSession: ObservableObject {
 
     private func waitWhileSpeaking() async {
         try? await Task.sleep(for: .milliseconds(300))
-        while voice.isSpeaking, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
+        while voice.isBusy, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
     }
 
     /// Until the picture stops changing (the person has finished turning), at least 0.8 s and

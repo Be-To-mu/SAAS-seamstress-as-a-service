@@ -6,7 +6,6 @@ import SwiftUI
 /// read from where the person stands, and everything is spoken too.
 struct ScanView: View {
     @StateObject private var session = ScanSession()
-    @StateObject private var assistant = FittingAssistant()
     @State private var introStep = 0
     var canCancel = false
     let onClose: (URL?) -> Void
@@ -107,7 +106,6 @@ struct ScanView: View {
                      text: "Stand it upright at waist height, against something steady, in an open space.")
             IntroRow(icon: "figure.stand", title: "Where to stand",
                      text: "About two metres from the phone, with your whole body, head to feet, in the picture.")
-            AskBar(assistant: assistant, voice: session.voicePrompter).padding(.top, 20)
             Button("Okay") { introStep = 1 }
                 .buttonStyle(TailoredButtonStyle(onDark: true))
                 .padding(.top, 12)
@@ -130,7 +128,6 @@ struct ScanView: View {
                      text: "Start facing the phone. It asks you to turn a little to your left, eight times, and to hold still at each stop while it takes a picture. Keep your arms as they are.")
             Text("The phone speaks every step, so you don't need to see the screen.")
                 .font(.system(size: 13)).opacity(0.75).padding(.top, 14)
-            AskBar(assistant: assistant, voice: session.voicePrompter).padding(.top, 14)
             HStack(spacing: 12) {
                 Button("Back") { introStep = 0 }
                     .buttonStyle(TailoredButtonStyle(filled: false, onDark: true))

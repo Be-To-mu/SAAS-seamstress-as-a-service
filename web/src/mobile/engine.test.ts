@@ -43,6 +43,7 @@ describe("mobile engine", () => {
     const dressed = E.dressRequest({ spec, extras: [], mannequin: img, garment: img, garmentView: img, angle: 90, guides: { hem: true }, hemAt: "at the knee" });
     expect(dressed).toHaveLength(4);
     expect(dressed[0]).toMatchObject({ text: expect.stringContaining("falls at the knee, exactly on the RED line") });
+    expect(dressed[0]).toMatchObject({ text: expect.stringContaining("Do not raise, spread or bend the arms") });
   });
   it("draws the picture from the look in words, not a generic jacket", () => {
     const spec = E.defaultSpecFor("coat");

@@ -20,10 +20,6 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>ElevenLabsAPIKey</key>
-	<string>$(ELEVENLABS_API_KEY)</string>
-	<key>ElevenLabsVoiceID</key>
-	<string>$(ELEVENLABS_VOICE_ID)</string>
 	<key>GeminiAPIKey</key>
 	<string>$(GEMINI_API_KEY)</string>
 	<key>GeminiModel</key>
@@ -32,14 +28,10 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Seamstress uses the camera and LiDAR to make a 3D model of your body.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Seamstress listens when you hold Ask, so you can ask questions about your fitting.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Seamstress uses the motion sensors to know which way is down while scanning.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Seamstress uses photos you pick as references for a garment design.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Your question is turned into text on the phone so the assistant can answer it.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>

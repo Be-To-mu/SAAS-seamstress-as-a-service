@@ -1,16 +1,16 @@
 {
-  "arms_down": "b995045e743104bd",
-  "arms_up": "7a6705262a76267c",
-  "come_closer": "071f16889c6a7048",
+  "arms_down": "77530fba67beda16",
+  "arms_up": "4d684c72649e693c",
+  "come_closer": "019a8282ca781484",
   "done": "cc6db80d2ff59af2",
-  "good": "3f907051c74a2fed",
-  "hold": "03e7b312b1b42e88",
-  "intro_pose": "ed524921f3571353",
+  "good": "9026cff7db134229",
+  "hold": "e302b96dbcbec9c9",
+  "intro_pose": "ef898a3607bc0dd0",
   "intro_prepare": "c26eeff30bb63385",
-  "not_seen": "2a065e165d246a86",
+  "not_seen": "5ea6d6c863400aae",
   "setup": "4020d78685dce092",
-  "stay_centre": "82323dad1af2ebdc",
-  "step_back": "e6d3be3979996dc6",
+  "stay_centre": "f55abec553167eb5",
+  "step_back": "f77e5cb998788b44",
   "stop_1": "47bf02bfad14a5d2",
   "stop_2": "0a7edcfebeb0894a",
   "stop_3": "9eca8bbe23f4b8c0",
@@ -18,5 +18,5 @@
   "stop_5": "fc902e27d028807b",
   "stop_6": "2e24daf307219b74",
   "stop_7": "c57fa0821750e5a7",
-  "whole_body": "bcbb1dbab0c2c3fd"
+  "whole_body": "f372fdd815ddacaf"
 }

@@ -14,6 +14,21 @@ final class WardrobeStore: ObservableObject {
 
     private var signature = ""
 
+    /// The Mac has deleted the designs in MongoDB after a reset (reset-done.json): drop both notes.
+    private static func finishReset() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard FileManager.default.fileExists(atPath: docs.appending(path: "reset-done.json").path) else { return }
+        for name in ["reset.json", "reset-done.json"] { try? FileManager.default.removeItem(at: docs.appending(path: name)) }
+    }
+
+    /// Forget everything (Reset the app; the files are already gone).
+    func reset() {
+        garments = []
+        fronts = [:]
+        drawing = []
+        signature = ""
+    }
+
     /// Load everything (thumbnails decoded off the main thread), then keep an eye
     /// on the folder for garments the Mac syncs down.
     func run() async {
@@ -21,6 +36,7 @@ final class WardrobeStore: ObservableObject {
         await drawMissingFronts()
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))
+            Self.finishReset()
             if GarmentStore.signature() != signature {
                 await reload()
                 await drawMissingFronts()

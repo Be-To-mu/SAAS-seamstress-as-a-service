@@ -157,6 +157,15 @@ final class BodyProfile: ObservableObject {
         }
     }
 
+    /// Forget the body (Reset the app).
+    func reset() {
+        scanValues = [:]
+        edits = [:]
+        scanName = nil
+        sex = nil
+        try? FileManager.default.removeItem(at: Self.file)
+    }
+
     private func save() {
         let s = Stored(scanName: scanName, scan: scanValues, edits: edits, sex: sex)
         try? JSONEncoder().encode(s).write(to: Self.file)

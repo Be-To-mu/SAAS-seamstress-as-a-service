@@ -7,6 +7,8 @@ import SwiftUI
 struct ResultView: View {
     let scan: URL
     var onNext: (() -> Void)? = nil
+    /// After a new scan: the next step is checking the measurements, so it waits for them.
+    var finalising = false
     @EnvironmentObject private var profile: BodyProfile
     @State private var measurements: ScanStore.Measurements?
     @State private var meshURL: URL?
@@ -31,13 +33,18 @@ struct ResultView: View {
                     Text(message.replacingOccurrences(of: "\n", with: " ")).font(.caption).foregroundStyle(Theme.sand)
                         .multilineTextAlignment(.center)
                 }
-                if let onNext {
+                if let onNext, finalising {
+                    Button(measurements == nil ? "Waiting for your measurements…" : "See your measurements", action: onNext)
+                        .buttonStyle(TailoredButtonStyle())
+                        .disabled(measurements == nil)
+                        .opacity(measurements == nil ? 0.45 : 1)
+                } else if let onNext {
                     Button("Design a garment", action: onNext).buttonStyle(TailoredButtonStyle())
                 }
                 // Measurements are there for whoever wants them, not in the way.
-                if measurements != nil {
+                if measurements != nil, !finalising {
                     NavigationLink(value: Route.measurements) {
-                        Text("Advanced · measurements").font(.system(size: 13)).underline()
+                        Text("Body measurements").font(.system(size: 13)).underline()
                     }
                     .foregroundStyle(Theme.sand)
                 }

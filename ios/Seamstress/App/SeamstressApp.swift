@@ -28,6 +28,8 @@ struct RootView: View {
     @StateObject private var wardrobe = WardrobeStore()
     @State private var hasBody = !ScanStore.all().isEmpty
     @State private var scanning = false
+    /// A new scan being finished: mannequin → measurements → what next, before the tabs appear.
+    @State private var finishing: URL? = FittingFlow.pending
     @State private var tab = Tab.wardrobe
     @State private var paths: [Tab: NavigationPath] = [:]
     /// The design request waiting for the Creating page (nil = redraw the current design).
@@ -47,9 +49,16 @@ struct RootView: View {
                     if let finished {
                         ScanStore.keepOnly(finished)  // one body at a time
                         hasBody = true
-                        tab = .wardrobe
-                        path = NavigationPath([Route.body(finished)])
+                        FittingFlow.pending = finished
+                        finishing = finished
                     }
+                }
+            } else if let scan = finishing {
+                FittingFlow(scan: scan) { next in
+                    FittingFlow.pending = nil
+                    paths = [:]
+                    tab = next
+                    finishing = nil
                 }
             } else {
                 TabView(selection: $tab) {
@@ -62,7 +71,7 @@ struct RootView: View {
                     stack(.market) { MarketplaceView(onMake: makeFromListing, onOpen: open) }
                         .tabItem { Label("Marketplace", systemImage: "bag") }
                         .tag(Tab.market)
-                    stack(.profile) { ProfileView { scanning = true } }
+                    stack(.profile) { ProfileView(onRescan: { scanning = true }, onReset: resetApp) }
                         .tabItem { Label("Profile", systemImage: "person") }
                         .tag(Tab.profile)
                 }
@@ -96,6 +105,28 @@ struct RootView: View {
         startDesign(DesignInput(images: draft.references, description: "\(l.title): \(l.detail)", mode: "match", current: nil))
     }
 
+    /// Start again from scratch, as on first launch: everything on the phone goes, and reset.json asks
+    /// the Mac (`bodyfit usb`) to delete the designs in MongoDB the next time the phone is plugged in.
+    private func resetApp() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        for item in (try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil)) ?? [] {
+            try? fm.removeItem(at: item)
+        }
+        if let id = Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName: id) }
+        let request = ["requested": ISO8601DateFormatter().string(from: Date())]
+        try? JSONSerialization.data(withJSONObject: request).write(to: docs.appending(path: "reset.json"))
+        draft.reset()
+        wardrobe.reset()
+        profile.reset()
+        MannequinMaker.shared.reset()
+        Dresser.shared.reset()
+        paths = [:]
+        tab = .wardrobe
+        finishing = nil
+        hasBody = false
+    }
+
     /// Back to the wardrobe, where the design now is.
     private func home() {
         paths = [:]
@@ -107,7 +138,7 @@ struct RootView: View {
         case .body(let scan):
             ResultView(scan: scan) { path.append(Route.design) }
         case .measurements:
-            MeasurementsView { path.append(Route.design) }
+            MeasurementsView()  // from the profile: just the numbers, no next step
         case .design:
             DesignView(onDesign: startDesign)
         case .creating:
@@ -194,6 +225,81 @@ struct RootView: View {
     }
 }
 
+/// After a new scan, everything else waits: your mannequin, then your measurements to check
+/// and confirm, then a choice of what to do first. Only then the tabs. Resumes after a relaunch.
+struct FittingFlow: View {
+    let scan: URL
+    let onDone: (RootView.Tab) -> Void
+    @State private var path = NavigationPath()
+
+    enum Step: Hashable { case measurements, ready }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            ResultView(scan: scan, onNext: { path.append(Step.measurements) }, finalising: true)
+                .navigationBarBackButtonHidden()
+                .navigationDestination(for: Step.self) { step in
+                    switch step {
+                    case .measurements:
+                        MeasurementsView(onNext: { path.append(Step.ready) }, finalising: true)
+                    case .ready:
+                        FittingDone(onDesign: { onDone(.create) }, onMarket: { onDone(.market) })
+                    }
+                }
+        }
+    }
+
+    /// The scan still to be finished, kept across launches.
+    static var pending: URL? {
+        get {
+            guard let name = UserDefaults.standard.string(forKey: "fitting.pending") else { return nil }
+            return ScanStore.all().first { $0.lastPathComponent == name }
+        }
+        set { UserDefaults.standard.set(newValue?.lastPathComponent, forKey: "fitting.pending") }
+    }
+}
+
+/// The fitting is done: design something, or see what others have made.
+private struct FittingDone: View {
+    let onDesign: () -> Void
+    let onMarket: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            Monogram(size: 56, color: Theme.brown).padding(.bottom, 22)
+            Text("Your fitting is done").eyebrowStyle()
+            Text("You're measured").titleStyle(36).padding(.top, 6)
+            Text("Your mannequin and measurements are ready. Everything you have made is cut to them.")
+                .font(Theme.body(16)).lineSpacing(3).padding(.top, 12)
+            Spacer()
+            VStack(spacing: 12) {
+                Button(action: onDesign) {
+                    HStack {
+                        Text("Design a garment")
+                        Spacer()
+                        Image(systemName: "arrow.right").font(.system(size: 14, weight: .light))
+                    }
+                }
+                .buttonStyle(TailoredButtonStyle())
+                Button(action: onMarket) {
+                    HStack {
+                        Text("Browse the marketplace")
+                        Spacer()
+                        Image(systemName: "arrow.right").font(.system(size: 14, weight: .light))
+                    }
+                }
+                .buttonStyle(TailoredButtonStyle(filled: false))
+            }
+        }
+        .padding(24)
+        .foregroundStyle(Theme.brown)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.cream.ignoresSafeArea())
+        .navigationBarBackButtonHidden()
+    }
+}
+
 enum Route: Hashable {
     case body(URL), measurements, design, creating, spin, seamstress, seamstressProfile(String), checkout(String), ordered, order(String), style, pattern
 }
@@ -202,6 +308,8 @@ enum Route: Hashable {
 /// The phone keeps one body at a time.
 struct ProfileView: View {
     let onRescan: () -> Void
+    let onReset: () -> Void
+    @State private var confirmReset = false
     @EnvironmentObject private var profile: BodyProfile
     @ObservedObject private var maker = MannequinMaker.shared
     @State private var scan: URL?
@@ -211,9 +319,6 @@ struct ProfileView: View {
         List {
             if let scan {
                 Section {
-                    NavigationLink(value: Route.body(scan)) {
-                        Label("Your mannequin", systemImage: "figure.stand")
-                    }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Body").font(.caption).foregroundStyle(Theme.sand)
                         Picker("Body", selection: $profile.sex) {
@@ -231,12 +336,15 @@ struct ProfileView: View {
                     }
                     .padding(.vertical, 4)
                     NavigationLink(value: Route.measurements) {
-                        Label("Advanced · measurements", systemImage: "ruler")
+                        Label("Body measurements", systemImage: "ruler")
                     }
+                    Button(action: onRescan) { Label("Redo body scan", systemImage: "camera") }
                 } header: {
                     Text("You")
                 } footer: {
-                    Text("Your mannequin is always made with this body.").font(.caption).foregroundStyle(Theme.sand)
+                    Text("Your mannequin is always made with this body. A new scan replaces your current body: "
+                        + "scan again if your measurements have changed or the last scan didn't come out well.")
+                        .font(.caption).foregroundStyle(Theme.sand)
                 }
             }
             Section("Your orders") {
@@ -249,10 +357,11 @@ struct ProfileView: View {
                 }
             }
             Section {
-                Button(action: onRescan) { Label("Redo body scan", systemImage: "camera") }
+                Button(role: .destructive) { confirmReset = true } label: {
+                    Label("Reset the app", systemImage: "arrow.counterclockwise")
+                }
             } footer: {
-                Text("A new scan replaces your current body. Scan again if your measurements have changed "
-                    + "or the last scan didn't come out well.").font(.caption).foregroundStyle(Theme.sand)
+                Text("Start again from scratch, with a new body scan.").font(.caption).foregroundStyle(Theme.sand)
             }
         }
         .listStyle(.plain)
@@ -260,6 +369,12 @@ struct ProfileView: View {
         .listRowBackgroundCream()
         .background(Theme.cream.ignoresSafeArea())
         .navigationTitle("Profile")
+        .confirmationDialog("Reset the app?", isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Reset everything", role: .destructive, action: onReset)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes your scan, mannequin, measurements, designs and orders on this phone, and your MongoDB wardrobe the next time the phone is plugged into your Mac. You'll start again with a new body scan.")
+        }
         .onAppear {
             scan = ScanStore.current
             if let scan { maker.load(scan) }

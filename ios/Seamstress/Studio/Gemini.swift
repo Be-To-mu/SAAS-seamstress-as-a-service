@@ -24,26 +24,6 @@ enum Gemini {
         return try engine.call("designResult", [raw, input, model])
     }
 
-    /// Questions need an answer in about a second; Argon took ~24 s, flash-lite ~1 s with complete answers.
-    static let answerModel = "gemini-3.1-flash-lite-preview"
-
-    /// A short spoken-style answer to a question, with `context` as the system instruction.
-    static func answer(_ question: String, context: String) async throws -> String {
-        guard let key = apiKey else { throw Engine.Failure(message: "No Gemini key") }
-        let body: JSON = .object([
-            "contents": .array([.object(["role": .string("user"), "parts": .array([.object(["text": .string(question)])])])]),
-            "systemInstruction": .object(["parts": .array([.object(["text": .string(context)])])]),
-            "generationConfig": .object([
-                "temperature": .number(0.4), "maxOutputTokens": .number(600),
-                "thinkingConfig": .object(["thinkingLevel": .string("low")]),
-            ]),
-        ])
-        let text = try await generate(model: answerModel, body: body, key: key).compactMap { $0["text"]?.string }.joined()
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw Engine.Failure(message: "No answer") }
-        return trimmed
-    }
-
     /// The image model the web studio uses for garment pictures.
     static let imageModel = "gemini-3.1-flash-image"
 

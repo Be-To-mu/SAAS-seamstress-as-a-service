@@ -194,6 +194,7 @@ export function dressParts(input: DressInput): GeminiPart[] {
     `Its pattern, for reference: ${describeSpec(spec)}. Where this differs from the garment image, follow the image.`,
     extras.length ? `The garment also has: ${extras.join("; ")}.` : "",
     "Fit it to the mannequin's body as it would really sit and drape. Keep the mannequin, its pose, the camera, the framing and the background exactly as in the first image.",
+    "POSE: keep the mannequin's arms exactly where they are in the first image, hanging straight down by its sides with the hands beside the thighs. Do not raise, spread or bend the arms, even if the garment image shows them differently.",
     input.hemAt ? `LENGTH: the garment is made to this wearer's chosen length. Its bottom edge (hem) falls ${input.hemAt}${guides?.hem ? ", exactly on the RED line drawn across the mannequin" : ""}. Lengthen or shorten the garment as needed; do not keep its length from the second image.` : "",
     input.sleeveAt ? `SLEEVES: the sleeves end ${input.sleeveAt}${guides?.sleeve ? ", exactly at the height of the BLUE line drawn across the mannequin" : ""}.` : "",
     guides?.hem || guides?.sleeve ? "Do not draw the guide lines in the result." : "",

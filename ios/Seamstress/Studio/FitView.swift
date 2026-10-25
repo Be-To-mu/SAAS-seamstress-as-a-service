@@ -28,7 +28,9 @@ struct FitStage: View {
                 Theme.linen
                 if let mannequin = maker.images[angle] {
                     let current = fitting.cached(angle)
-                    picture(current ?? shown[angle] ?? mannequin, fitting: fitting)
+                    // The lines sit on the hem and cuffs found in the picture, when it's the one at this fit.
+                    let found = current.flatMap { dresser.edges(of: $0) }
+                    picture(current ?? shown[angle] ?? mannequin, fitting: fitting, found: found)
                     if current == nil, dresser.isBusy(fitting, angle) {
                         AtelierProgress(size: 40, caption: shown[angle] == nil ? "Dressing your mannequin…" : "Refitting…")
                             .padding(14).background(Theme.cream.opacity(0.9))
@@ -69,14 +71,14 @@ struct FitStage: View {
     // MARK: - Picture and guide lines
 
     /// The picture fitted to the space, with the hem and cuff marks over it to pull.
-    private func picture(_ image: UIImage, fitting: Fitting) -> some View {
+    private func picture(_ image: UIImage, fitting: Fitting, found: GarmentEdges.Found?) -> some View {
         GeometryReader { geo in
             let rect = fitted(image.size, in: geo.size)
             ZStack(alignment: .topLeading) {
                 Image(uiImage: image).resizable().frame(width: rect.width, height: rect.height)
                     .offset(x: rect.minX, y: rect.minY)
                 if let map = fitting.map(angle) {
-                    ForEach(fitting.guides(angle, moving: drag), id: \.key) { g in
+                    ForEach(fitting.guides(angle, moving: drag, found: found), id: \.key) { g in
                         guideLine(g, map: map, rect: rect, height: fitting.height)
                     }
                 }
@@ -371,13 +373,24 @@ struct Fitting {
         return 0.485 * height
     }
 
-    /// The marks for `angle`, cm above the floor turned into picture y on that view's own figure.
+    /// The marks for `angle`, cm above the floor turned into picture y on that view's own figure, or —
+    /// when `found` has them — exactly where the hem and cuffs are in the picture shown.
     /// `moving` is a drag in progress (cm added to one of them).
-    func guides(_ angle: Int, moving: (key: String, cm: Double)? = nil) -> [Guide] {
+    func guides(_ angle: Int, moving: (key: String, cm: Double)? = nil, found: GarmentEdges.Found? = nil) -> [Guide] {
         guard let shape, let map = map(angle) else { return [] }
         var out: [Guide] = []
         func add(_ key: String, _ above: Double) {
-            let at = above - (moving?.key == key ? moving!.cm : 0)  // longer = lower
+            let drag = moving?.key == key ? moving!.cm : 0
+            let at = above - drag  // longer = lower
+            let perCm = (map.soles - map.crown) / height
+            if key == "length", let hem = found?.hem, let span = found?.hemSpan {
+                out.append(Guide(key: key, y: hem + drag * perCm, spans: [span], above: at))
+                return
+            }
+            if key == "sleeve", let cuff = found?.cuff, let spans = found?.cuffSpans, !spans.isEmpty {
+                out.append(Guide(key: key, y: cuff + drag * perCm, spans: spans, above: at))
+                return
+            }
             let y = map.y(at, height: height)
             let runs = map.runs(at: y)
             let spans: [ClosedRange<Double>]
@@ -481,11 +494,25 @@ final class Dresser: ObservableObject {
     /// Per garment (`Fitting.designKey`): cm between where the pattern puts the hem and cuffs and where
     /// they are in the dressed front. From the front because the arms hang clear of the body there.
     @Published private(set) var offsets: [String: [String: Double]] = [:]
-    private var calibrated: Set<String> = []
+    /// Per dressed picture: where its hem and cuffs are.
+    @Published private var found: [ObjectIdentifier: (UIImage, GarmentEdges.Found)] = [:]
     @Published private var busy: Set<String> = []
     @Published private var errors: [String: String] = [:]
     private var running: [String: Task<UIImage?, Never>] = [:]
     private var preloading: Task<Void, Never>?
+
+    /// Forget everything (Reset the app).
+    func reset() {
+        preloading?.cancel()
+        running.values.forEach { $0.cancel() }
+        running = [:]
+        maps = [:]
+        offsets = [:]
+        found = [:]
+        busy = []
+        errors = [:]
+        measured = [:]
+    }
     private var measured: [ObjectIdentifier: Int] = [:]
 
     func isBusy(_ f: Fitting, _ angle: Int) -> Bool { busy.contains(id(f, angle)) }
@@ -531,21 +558,28 @@ final class Dresser: ObservableObject {
         return await task.value
     }
 
-    /// Measure where the hem and cuffs really are in the dressed front, once per picture.
+    /// The hem and cuffs found in a dressed picture (see `calibrate`).
+    func edges(of image: UIImage) -> GarmentEdges.Found? { found[ObjectIdentifier(image)]?.1 }
+
+    /// Find where the hem and cuffs really are in a dressed picture, once per picture. From the front,
+    /// this also calibrates where the marks go on the next pictures.
     private func calibrate(_ f: Fitting, _ angle: Int, _ image: UIImage) async {
-        let id = id(f, angle)
-        guard angle == 0, !calibrated.contains(id), let mannequin = f.mannequins[angle], let map = maps[angle] else { return }
-        calibrated.insert(id)
-        let edges = await Task.detached(priority: .userInitiated) {
-            GarmentEdges.find(dressed: image, mannequin: mannequin, map: map)
+        let key = ObjectIdentifier(image)
+        guard found[key] == nil, let mannequin = f.mannequins[angle], let mannequinMap = maps[angle] else { return }
+        let result = await Task.detached(priority: .userInitiated) { () -> (FigureMap, GarmentEdges.Found)? in
+            guard let map = MannequinStore.figureMap(image) else { return nil }
+            return (map, GarmentEdges.find(dressed: image, map: map, mannequin: mannequin, mannequinMap: mannequinMap, angle: angle))
         }.value
-        var found: [String: Double] = offsets[f.designKey] ?? [:]
-        for (key, raw) in f.rawLevels {
-            guard let y = key == "length" ? edges.hem : edges.cuff else { continue }
+        guard let (map, edges) = result else { return }
+        found[key] = (image, edges)  // the picture is kept so its identity stays its own
+        guard angle == 0 else { return }
+        var cm: [String: Double] = offsets[f.designKey] ?? [:]
+        for (k, raw) in f.rawLevels {
+            guard let y = k == "length" ? edges.hem : edges.cuff else { continue }
             let offset = map.above(y, height: f.height) - raw
-            if abs(offset) < 30 { found[key] = offset }  // more than that is a misreading, not a fit
+            if abs(offset) < 30 { cm[k] = offset }  // more than that is a misreading, not a fit
         }
-        offsets[f.designKey] = found
+        offsets[f.designKey] = cm
     }
 
     /// Get the mannequin ready and dress `angles` of the draft in the background: called as soon as

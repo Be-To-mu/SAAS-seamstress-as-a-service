@@ -1,20 +1,24 @@
 import SwiftUI
 
-/// Your measurements (Advanced: the app works without ever opening this), filled in from
+/// Your body measurements (the app works without ever opening this), filled in from
 /// the scan, by category: Body, Top, Arms, Bottom. Change any number; it is marked as
 /// edited and can be reset to the scanned value.
 struct MeasurementsView: View {
     @EnvironmentObject private var profile: BodyProfile
-    let onNext: () -> Void
+    /// The button at the bottom (confirming them after a scan); none when opened from the profile.
+    var onNext: (() -> Void)?
+    /// After a new scan: check them, then confirm to finish the fitting.
+    var finalising = false
     @State private var group = MeasureCatalog.groups[0]
 
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Advanced").eyebrowStyle()
+                    Text(finalising ? "Your fitting · last step" : "Your body").eyebrowStyle()
                     Text("Your measurements").titleStyle(30)
-                    Text("Filled in from your scan. Tap a number to change it.").font(Theme.body(14)).opacity(0.8)
+                    Text(finalising ? "Filled in from your scan. Check them, change any that look wrong, then confirm."
+                                    : "Filled in from your scan. Tap a number to change it.").font(Theme.body(14)).opacity(0.8)
                     Picker("Category", selection: $group) {
                         ForEach(MeasureCatalog.groups, id: \.self) { Text($0) }
                     }
@@ -49,10 +53,12 @@ struct MeasurementsView: View {
         .navigationTitle("Measurements")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            Button(action: onNext) { Text("Design a garment") }
-                .buttonStyle(TailoredButtonStyle())
-                .padding()
-                .background(Theme.cream.opacity(0.95))
+            if let onNext {
+                Button(action: onNext) { Text("Confirm my measurements") }
+                    .buttonStyle(TailoredButtonStyle())
+                    .padding()
+                    .background(Theme.cream.opacity(0.95))
+            }
         }
     }
 }

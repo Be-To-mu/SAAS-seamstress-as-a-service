@@ -174,17 +174,26 @@ struct Pixels: Sendable {
     }
 }
 
-/// Where the garment really ends in a dressed picture: the hem, and the cuffs (from the front,
-/// with the arms hanging apart from the body). A pixel is garment when it is like neither the
-/// bare mannequin nor the background; the hem is the lowest garment row across the body, the
-/// cuffs the lowest garment row down each arm. Nil when the cloth is too close to the mannequin's colour.
+/// Where the garment really ends in a dressed picture, read from the picture itself (Gemini
+/// doesn't always keep the mannequin's pose): the hem is the lowest row of cloth across the
+/// middle of the body; a cuff is where the outermost part of an arm stops being cloth (the
+/// hand below it). Colours are compared by hue, so shading doesn't count as a change.
+/// Nil where it can't tell (cloth too close to the mannequin's colour; the cuffs in profile).
 enum GarmentEdges {
-    static func find(dressed: UIImage, mannequin: UIImage, map: FigureMap) -> (hem: Double?, cuff: Double?) {
-        guard let d = Pixels(dressed), let m = Pixels(mannequin) else { return (nil, nil) }
+    struct Found: Sendable {
+        var hem: Double?
+        /// Across the hem, normalised x.
+        var hemSpan: ClosedRange<Double>?
+        var cuff: Double?
+        /// Across each cuff, normalised x.
+        var cuffSpans: [ClosedRange<Double>] = []
+    }
+
+    static func find(dressed: UIImage, map: FigureMap, mannequin: UIImage, mannequinMap: FigureMap, angle: Int) -> Found {
+        guard let d = Pixels(dressed), let m = Pixels(mannequin) else { return Found() }
         let span = map.soles - map.crown
         let chest = map.crown + 0.3 * span
-        let mid = { (y: Double) -> Double in let e = map.extent(at: y); return (e.lowerBound + e.upperBound) / 2 }
-        // Compared by colour ratios with a little brightness: shading changes how light the mannequin is, not its hue.
+        func mid(_ map: FigureMap, _ y: Double) -> Double { let e = map.extent(at: y); return (e.lowerBound + e.upperBound) / 2 }
         func feature(_ c: (Int, Int, Int)) -> (Double, Double, Double) {
             let sum = Double(max(1, c.0 + c.1 + c.2))
             return (Double(c.0) / sum, Double(c.1) / sum, 0.15 * sum / 765)
@@ -192,43 +201,70 @@ enum GarmentEdges {
         func dist(_ a: (Double, Double, Double), _ b: (Double, Double, Double)) -> Double {
             ((a.0 - b.0) * (a.0 - b.0) + (a.1 - b.1) * (a.1 - b.1) + (a.2 - b.2) * (a.2 - b.2)).squareRoot()
         }
-        let bare = feature(m.patch(mid(chest), chest))  // the mannequin's own colour
+        let mChest = mannequinMap.crown + 0.3 * (mannequinMap.soles - mannequinMap.crown)
+        let bare = feature(m.patch(mid(mannequinMap, mChest), mChest))  // the mannequin's own colour
         let background = feature(d.patch(0.04, 0.04))
-        let cloth = feature(d.patch(mid(chest), chest))
-        guard dist(cloth, bare) > 0.03, dist(cloth, background) > 0.03 else { return (nil, nil) }
-        func isGarment(_ x: Double, _ y: Double) -> Bool {
+        let cloth = feature(d.patch(mid(map, chest), chest))
+        guard dist(cloth, bare) > 0.03, dist(cloth, background) > 0.03 else { return Found() }
+        enum Kind { case cloth, bare, background }
+        func kind(_ x: Double, _ y: Double) -> Kind {
             let f = feature(d.rgb(x, y))
-            let c = dist(f, cloth)
-            return c < dist(f, bare) && c < dist(f, background)
+            let c = dist(f, cloth), b = dist(f, bare), g = dist(f, background)
+            return c < b && c < g ? .cloth : b < g ? .bare : .background
         }
-        func fraction(_ y: Double, _ bands: [ClosedRange<Double>]) -> Double {
-            var hit = 0, n = 0
-            for b in bands { for x in stride(from: b.lowerBound, through: b.upperBound, by: max(0.004, (b.upperBound - b.lowerBound) / 12)) {
-                n += 1; if isGarment(x, y) { hit += 1 }
-            } }
-            return n == 0 ? 0 : Double(hit) / Double(n)
+        func fraction(_ k: Kind, _ y: Double, _ band: ClosedRange<Double>) -> Double {
+            let xs = stride(from: band.lowerBound, through: band.upperBound, by: max(0.003, (band.upperBound - band.lowerBound) / 10))
+            let all = Array(xs)
+            return Double(all.filter { kind($0, y) == k }.count) / Double(max(1, all.count))
         }
         let step = span / 300
-        func lowest(_ bands: [ClosedRange<Double>], from: Double, to: Double) -> Double? {
-            var y = to, found: Double?
-            while y > from { if fraction(y, bands) > 0.5 { found = y; break }; y -= step }
-            return found
-        }
-        // Hem: across the middle of the body, from the hips down.
+        var found = Found()
+        // Hem: the lowest row of cloth across the middle of the body, from the hips down.
         let hipY = map.crown + 0.5 * span
         let hip = map.extent(at: hipY), w = hip.upperBound - hip.lowerBound
-        let torso = (hip.lowerBound + 0.3 * w)...(hip.upperBound - 0.3 * w)
-        let hem = lowest([torso], from: hipY, to: map.soles - 0.03 * span)
-        // Cuffs: down each arm, taken from the hands where the arms hang apart from the body.
-        var cuff: Double?
-        if let tips = map.fingertips {
-            let runs = map.runs(at: tips - 0.04 * span)
-            if runs.count >= 3, let l = runs.first, let r = runs.last {
-                let arms = [l, r].map { ($0.lowerBound + 0.2 * ($0.upperBound - $0.lowerBound))...($0.upperBound - 0.2 * ($0.upperBound - $0.lowerBound)) }
-                cuff = lowest(arms, from: map.crown + 0.25 * span, to: tips)
+        let torso = (hip.lowerBound + 0.32 * w)...(hip.upperBound - 0.32 * w)
+        var y = map.soles - 0.03 * span
+        while y > hipY {
+            if fraction(.cloth, y, torso) > 0.5 {
+                let e = map.extent(at: y - step)
+                found.hem = y
+                found.hemSpan = (e.lowerBound - 0.02)...(e.upperBound + 0.02)
+                break
+            }
+            y -= step
+        }
+        // Cuffs (not in profile, where the arm is in front of the body): down the outer edge of each
+        // side, the first rows where cloth gives way to a bare hand.
+        guard angle != 90, angle != 270 else { return found }
+        let width = map.extent(at: chest).upperBound - map.extent(at: chest).lowerBound
+        var cuffs: [(Double, ClosedRange<Double>)] = []
+        for side in [0, 1] {
+            func band(_ y: Double) -> ClosedRange<Double> {
+                let e = map.extent(at: y), b = 0.09 * width
+                return side == 0 ? e.lowerBound...(e.lowerBound + b) : (e.upperBound - b)...e.upperBound
+            }
+            var y = map.crown + 0.3 * span, sawCloth = false, run = 0
+            while y < map.crown + 0.75 * span {
+                let b = band(y)
+                // Past the sleeve, the edge of the figure is the hand: bare, or shaded close to the
+                // background's grey; either way not cloth.
+                let c = fraction(.cloth, y, b)
+                if c > 0.5 { sawCloth = true; run = 0 }
+                else if sawCloth, c < 0.25 {
+                    run += 1
+                    if run >= 3 { let at = y - 3 * step; cuffs.append((at, band(at))); break }
+                } else { run = 0 }
+                y += step
             }
         }
-        return (hem, cuff)
+        // A cuff well above the hem, and the two sides agreeing; otherwise better the estimate than a wrong line.
+        cuffs = cuffs.filter { $0.0 < (found.hem ?? map.soles) - 0.05 * span }
+        if cuffs.count == 2, abs(cuffs[0].0 - cuffs[1].0) > 0.06 * span { cuffs = [] }
+        if !cuffs.isEmpty {
+            found.cuff = cuffs.map(\.0).reduce(0, +) / Double(cuffs.count)
+            found.cuffSpans = cuffs.map(\.1)
+        }
+        return found
     }
 }
 
@@ -267,6 +303,14 @@ final class MannequinMaker: ObservableObject {
     private static func madeAt(_ scan: URL) -> Date {
         (try? MannequinStore.folder(scan).appending(path: "0.jpg").resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate ?? .distantPast
+    }
+
+    /// Forget the mannequin (Reset the app).
+    func reset() {
+        scan = nil
+        images = [:]
+        state = .idle
+        stamp = .distantPast
     }
 
     /// Make the mannequin again as `sex` (after it's changed in the profile). The scan photos are gone by
